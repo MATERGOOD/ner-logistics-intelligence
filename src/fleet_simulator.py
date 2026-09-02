@@ -102,7 +102,7 @@ class FleetSimulator:
             current_idx = int((len(v["path_nodes"]) - 1) * fract)
             remaining_nodes = v["path_nodes"][current_idx:]
             
-            status = "🟢 En Route - Clear"
+            status = "[OK] En Route - Clear"
             advisory = "None"
             alert = False
             
@@ -120,12 +120,12 @@ class FleetSimulator:
                         # does this exactly strictly match a blocked row? Look at explicit or live subsets
                         # We also check base G status if synced just in case
                         if exact_id in blocked_set or "Blocked" in exact_id:
-                            status = "🚨 ALERT: ROUTE SEVERED"
+                            status = "[ALERT] ROUTE SEVERED"
                             advisory = f"Convoy {v_id} carrying '{v['cargo']}' approaching Landslide hazard at {seg_name}. Emergency advisory: Deploy alternate detour immediately (+45 min delay penalty)."
                             alert = True
                             break
             else:
-                status = "🔵 Secure Reroute - Diverted"
+                status = "[SECURE] Reroute - Diverted"
                 advisory = "Successfully diverted away from active hazard zone."
                 
             results.append({
