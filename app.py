@@ -66,6 +66,18 @@ boundaries, base_roads, current_precip, base_G = load_data()
 roads = base_roads.copy()
 G = base_G.copy()
 
+def parse_node_id(node_val, G):
+    if node_val in G:
+        return node_val
+    if isinstance(node_val, str):
+        import re
+        match = re.search(r'\b\d+\b', node_val)
+        if match:
+            candidate = int(match.group(0))
+            if candidate in G:
+                return candidate
+    return list(G.nodes())[0]
+
 if "fleet_sim" not in st.session_state:
     nodes_gdf, edges_gdf = ox.graph_to_gdfs(base_G)
     st.session_state.fleet_sim = FleetSimulator(base_G, nodes_gdf)
@@ -180,8 +192,8 @@ origin_sel = col_o.selectbox(t["orig"], node_options, index=0)
 dest_sel = col_d.selectbox(t["dest"], node_options, index=len(node_options)-1 if len(node_options)>0 else 0)
 b_preset = st.sidebar.button(t["btn_preset"])
 b_route = st.sidebar.button(t["btn_calc"])
-origin_node = str(origin_sel).split(" ")[1] if not b_preset else guwahati_preset.split(" ")[1]
-dest_node = str(dest_sel).split(" ")[1] if not b_preset else nongpoh_preset.split(" ")[1]
+origin_node = parse_node_id(origin_sel if not b_preset else guwahati_preset, G)
+dest_node = parse_node_id(dest_sel if not b_preset else nongpoh_preset, G)
 
 tabs = st.tabs([t["t1"], t["t2"]])
 
@@ -315,8 +327,8 @@ with tabs[0]:
             btn_dispatch = st.form_submit_button("🚀 Dispatch Logistics Mission")
             
         if btn_dispatch:
-            origin_node2 = str(origin_sel2).split(" ")[1]
-            dest_node2 = str(dest_sel2).split(" ")[1]
+            origin_node2 = parse_node_id(origin_sel2, G)
+            dest_node2 = parse_node_id(dest_sel2, G)
             
             if "Vaccines" in cargo_type: tier, prio_text = 1, "[CRITICAL]"
             elif "Relief" in cargo_type: tier, prio_text = 2, "[HIGH]"
