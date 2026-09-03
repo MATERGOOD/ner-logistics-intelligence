@@ -3,10 +3,13 @@ import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-def compute_routes(G, origin_node, dest_node, blocked_edge_ids=[]):
+def compute_routes(G, origin_node, dest_node, blocked_edge_ids=[], risk_map=None, cargo_tier=3):
     """
-    Computes both baseline and resilient shortest routes accounting for blocked edges.
+    Computes both baseline and resilient shortest routes accounting for blocked edges and Cargo Tiers.
     """
+    if risk_map is None:
+        risk_map = {}
+        
     # Create working copies
     G_baseline = G.copy()
     G_resilient = G.copy()
@@ -59,8 +62,11 @@ def compute_routes(G, origin_node, dest_node, blocked_edge_ids=[]):
         base_actual_t_min = float("inf")
         compromised_segments = []
         
-    # 2. Resilient Route (avoiding Blocked, penalizing Caution)
-    # Prune Blocked edges and penalize Caution
+    # 2. Resilient Route (avoiding Blocked, penalizing Caution, and respecting Cargo Tiers)
+    # Tier 1 (Critical): zero tolerance for risk_score > 0.3
+    # Tier 2 (High): zero tolerance for risk_score > 0.5
+    # Tier 3 (Normal): based only on explicit blocks
+    
     edges_to_remove = []
     for u, v, k, data in G_resilient.edges(keys=True, data=True):
         st = data.get("status", "Clear")
@@ -69,6 +75,17 @@ def compute_routes(G, origin_node, dest_node, blocked_edge_ids=[]):
         
         # Explicit block check
         if any(str(b_id) in str(data) or str(b_id) in f"{(u, v, k)} - {seg_name}" for b_id in blocked_edge_ids):
+            st = "Blocked"
+            
+        # Cargo Tier Risk Checks
+        risk_val = risk_map.get(seg_name, 0.0) # try name 
+        if risk_val == 0.0:
+            exact_id = f"{(u, v, k)} - {seg_name}"
+            risk_val = risk_map.get(exact_id, 0.0)
+            
+        if cargo_tier == 1 and risk_val > 0.3:
+            st = "Blocked"
+        elif cargo_tier == 2 and risk_val > 0.5:
             st = "Blocked"
             
         if st == "Blocked":
@@ -98,6 +115,17 @@ def compute_routes(G, origin_node, dest_node, blocked_edge_ids=[]):
             "resilient_path": None
         }
 
+    # Delay Recovered Logic
+    if base_actual_t_min == float("inf"):
+        disrupted_eta = base_t_min_if_finite = sum(G_baseline[u][v][0].get(base_weight, 1.0) for u, v in zip(baseline_path[:-1], baseline_path[1:]))
+        disrupted_eta += len(compromised_segments) * 180 # 3h penalty per blocked segment 
+    else:
+        disrupted_eta = base_actual_t_min
+        
+    recovered_delay_mins = disrupted_eta - res_t_min
+    if recovered_delay_mins < 0: 
+        recovered_delay_mins = 0
+
     return {
         "status": status_msg,
         "message": "Alternate route successfully plotted.",
@@ -108,5 +136,6 @@ def compute_routes(G, origin_node, dest_node, blocked_edge_ids=[]):
         "resilient_path": resilient_path,
         "res_dist_km": round(res_dist_km, 2),
         "res_duration_min": round(res_t_min, 2),
-        "detour_delay_message": f"+{round(res_dist_km - base_dist_km, 2)} km detour"
+        "detour_delay_message": f"+{round(res_dist_km - base_dist_km, 2)} km detour",
+        "recovered_delay_mins": round(recovered_delay_mins, 2)
     }

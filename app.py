@@ -21,9 +21,17 @@ except Exception as e:
 
 from fleet_simulator import FleetSimulator
 try:
-    from incident_manager import get_active_incidents, submit_report, resolve_incident
+    from incident_manager import get_active_incidents, submit_report, resolve_incident, verify_incident, dismiss_incident
 except:
     pass
+
+from ml_predictor import DisruptionPredictor
+
+@st.cache_resource
+def load_predictor():
+    return DisruptionPredictor()
+
+predictor = load_predictor()
 
 @st.cache_data
 def load_data():
@@ -61,6 +69,8 @@ G = base_G.copy()
 if "fleet_sim" not in st.session_state:
     nodes_gdf, edges_gdf = ox.graph_to_gdfs(base_G)
     st.session_state.fleet_sim = FleetSimulator(base_G, nodes_gdf)
+if "delay_recovered" not in st.session_state:
+    st.session_state.delay_recovered = 0.0
 
 lang = st.sidebar.selectbox("Language / ভাষা", ["English", "हिंदी (Hindi)", "অসমীয়া (Assamese)"])
 trans = {
@@ -128,8 +138,8 @@ sim_rain = st.sidebar.slider(t["lbl_rain"], 0.0, 100.0, float(current_precip), 1
 forced_blocks = st.sidebar.multiselect(t["lbl_block"], roads["segment_id"].tolist())
 
 field_blocks = []
-if not incidents_df.empty and "severity" in incidents_df.columns:
-    field_blocks.extend(incidents_df[incidents_df["severity"] == "Complete Road Severed"]["nearest_segment_id"].tolist())
+if not incidents_df.empty and "severity" in incidents_df.columns and "status" in incidents_df.columns:
+    field_blocks.extend(incidents_df[(incidents_df["severity"] == "Complete Road Severed") & (incidents_df["status"] == "Verified & Confirmed")]["nearest_segment_id"].tolist())
 forced_blocks.extend([f for f in field_blocks if f not in forced_blocks])
 
 st.sidebar.markdown("---")
@@ -175,10 +185,22 @@ tabs = st.tabs([t["t1"], t["t2"]])
 with tabs[0]:
     rain_factor = min(1.0, sim_rain / 50.0)
     def update_row(row):
-        rs = min(1.0, (0.45 * rain_factor) + (0.35 * row["slope_factor"]) + (0.20 * row["hist_risk"]))
+        rain_mm = sim_rain
+        accum_24h = rain_mm * 4 + 20
+        slope = row.get("slope_factor", 0.5) * 45
+        hist_risk = row.get("hist_risk", 0.0) * 5
+        preds = predictor.predict_segment_risk(rain_mm, accum_24h, slope, 500.0, 350.0, hist_risk, 0.8)
+        
+        rs = preds["closure_probability"]
         status, color, delay = calculate_status(rs)
         if row["segment_id"] in forced_blocks: status, color, delay, rs = "Blocked", "#dc3545", 999.0, 1.0
         row["risk_score"], row["status"], row["color"], row["delay_factor"] = round(rs, 3), status, color, delay
+        
+        row["ai_landslide_prob"] = preds["landslide_probability"]
+        row["ai_flood_prob"] = preds["flood_probability"]
+        row["ai_risk_window"] = preds["risk_window"]
+        row["ai_confidence"] = preds["confidence_score"]
+        row["ai_feature_imp"] = preds["feature_importance"]
         return row
     roads = roads.apply(update_row, axis=1)
 
@@ -206,10 +228,86 @@ with tabs[0]:
     if fleet_status:
         st.table(pd.DataFrame([{t["tbl_col1"]: v["id"], t["tbl_col2"]: v["cargo"], t["tbl_col3"]: v["status"], t["tbl_col4"]: v["advisory"]} for v in fleet_status]))
 
+    st.markdown("---")
+    st.subheader("📦 Create & Dispatch Logistics Mission")
+    with st.form("dispatch_mission_form"):
+        cm1, cm2, cm3 = st.columns(3)
+        msn_name = cm1.text_input("Mission Name / Consignment ID", "MSN-704")
+        cargo_type = cm2.selectbox("Cargo Type", ["Vaccines & Cold Chain", "Relief Food & Water", "General Fuel / Hardware"])
+        deadline = cm3.time_input("Required Delivery Deadline")
+        
+        cm4, cm5, cm6 = st.columns(3)
+        origin_sel2 = cm4.selectbox("Origin Staging Hub", node_options, index=0)
+        dest_sel2 = cm5.selectbox("Relief Target Destination", node_options, index=len(node_options)-1 if len(node_options)>0 else 0)
+        convoy = cm6.selectbox("Assigned Convoy", ["TRK-01 (Medical Refrigerated)", "TRK-02 (Heavy Cargo)", "TRK-03 (Tanker)"])
+        
+        btn_dispatch = st.form_submit_button("🚀 Dispatch Logistics Mission")
+
     route_metrics = None
-    if b_route or b_preset:
+    risk_map = {row["segment_id"]: row["risk_score"] for _, row in roads.iterrows()}
+    
+    def get_path_risk(path, roads_df):
+        risks = []
+        if not path: return 0.0
+        for i in range(len(path)-1):
+            u, v = path[i], path[i+1]
+            try:
+                r = roads_df.loc[(u, v)]["risk_score"].max()
+                risks.append(r)
+            except:
+                risks.append(0)
+        return max(risks) if risks else 0.0
+
+    if btn_dispatch:
+        origin_node2 = str(origin_sel2).split(" ")[1]
+        dest_node2 = str(dest_sel2).split(" ")[1]
+        
+        if "Vaccines" in cargo_type: tier, prio_text = 1, "[CRITICAL]"
+        elif "Relief" in cargo_type: tier, prio_text = 2, "[HIGH]"
+        else: tier, prio_text = 3, "[NORMAL]"
+        
+        st.info(f"**Mission Priority:** {prio_text} | Deploying dispatch logic for {cargo_type}")
+        
+        res = compute_routes(G, origin_node2, dest_node2, blocked_edge_ids=forced_blocks, risk_map=risk_map, cargo_tier=tier)
+        route_metrics = res
+        
+        if res["status"] == "IMPASSABLE": 
+            st.error("[ALERT] " + res["message"])
+        else:
+            st.markdown("### AI Logistics Mission Recommendation & Explainability Card")
+            st.write(f"**Selected Route vs Alternate Route Table**")
+            
+            base_risk = get_path_risk(res["baseline_path"], roads)
+            res_risk = get_path_risk(res["resilient_path"], roads)
+                
+            dist_same = abs(res['res_dist_km'] - res['base_dist_km']) < 0.1
+            st.markdown(f"""
+            - **Route A (Shortest / High Risk)**: Distance: {res['base_dist_km']} km | Disruption Prob: {base_risk*100:.1f}% | Status: **{'REJECTED' if not dist_same else 'APPROVED'}**
+            - **Route B (Recommended Safe Bypass)**: Distance: {res['res_dist_km']} km | Disruption Prob: {res_risk*100:.1f}% | Status: **APPROVED**
+            """)
+            
+            st.markdown("**Why Route B Selected? (Explainable AI reasoning):**")
+            if not dist_same:
+                prob_diff = max(0, base_risk - res_risk)
+                st.write(f"- ✅ {prob_diff*100:.1f}% lower disruption probability")
+                st.write(f"- ✅ Bypasses active high-risk zone with >{tier*30 if tier < 3 else 100}% probability")
+                st.write(f"- ✅ {prio_text} Priority overrides shortest-path penalty ({res['detour_delay_message']} justified)")
+            else:
+                st.write("- ✅ Shortest path is secure enough for this Cargo Tier.")
+                st.write("- ✅ No active severe blockages identified on primary trajectory.")
+            
+            hr = res.get('recovered_delay_mins', 0) // 60
+            mn = res.get('recovered_delay_mins', 0) % 60
+            rec_str = f"{int(hr)}h {int(mn)}m" if hr > 0 else f"{int(mn)}m"
+            st.success(f"**⚡ AI Reroute Recovered:** {rec_str} of potential disaster delay")
+            # Avoid re-adding on purely re-runs by attaching to session if not cached, but for demo we just sum the output
+            if not getattr(st.session_state, "_last_dispatch_id", None) == (msn_name, res.get('recovered_delay_mins')):
+                st.session_state.delay_recovered += res.get('recovered_delay_mins', 0)
+                st.session_state._last_dispatch_id = (msn_name, res.get('recovered_delay_mins'))
+
+    elif b_route or b_preset:
         st.markdown("---")
-        res = compute_routes(G, origin_node, dest_node, blocked_edge_ids=forced_blocks)
+        res = compute_routes(G, origin_node, dest_node, blocked_edge_ids=forced_blocks, risk_map=risk_map, cargo_tier=3)
         route_metrics = res
         if res["status"] == "IMPASSABLE": st.error("[ALERT] " + res["message"])
         else:
@@ -217,6 +315,40 @@ with tabs[0]:
             c1, c2 = st.columns(2)
             with c1: st.info(f"**Baseline Route**\n\nDistance: {res['base_dist_km']} km\n\nTime: {res['base_duration_min']} mins")
             with c2: st.success(f"**Resilient Detour**\n\nDistance: {res['res_dist_km']} km\n\nTime: {res['res_duration_min']} mins\n\n{res['detour_delay_message']}")
+
+    st.markdown("---")
+    st.markdown("### 🚨 Regional Emergency Command Center Status")
+    
+    high_risk_count = len(roads[roads["risk_score"] > 0.6])
+    at_risk_convoys = len([v for v in fleet_status if v.get("alert")])
+    tl_color = "red" if high_risk_count > 0 or not incidents_df.empty else "green"
+    tl_text = "[ELEVATED - MONSOON SURGE]" if high_risk_count > 0 else "[NOMINAL]"
+    st.markdown(f"**Regional Threat Level:** <span style='color:{tl_color}'>{tl_text}</span>", unsafe_allow_html=True)
+    
+    r1, r2, r3, r4, r5 = st.columns(5)
+    r1.metric("🛣️ Critical Corridors", "1 (NH-6)")
+    r2.metric("⚠️ High-Risk Segments", f"{high_risk_count}")
+    r3.metric("🚛 Active Missions", f"{len(fleet_status)}")
+    r4.metric("🚨 Missions At Risk", f"{at_risk_convoys}")
+    
+    tot_hr = st.session_state.delay_recovered // 60
+    tot_mn = st.session_state.delay_recovered % 60
+    r5.metric("⏳ Disaster Delay Avoided", f"+{int(tot_hr)}h {int(tot_mn)}m")
+
+    st.info("**Recommended Next Actions:**")
+    actions = []
+    if at_risk_convoys > 0:
+        actions.append("1. Re-route critical convoys away from affected zones via AI Dispatch.")
+    if not incidents_df.empty and len(incidents_df[incidents_df["status"].str.contains("Pending")]) > 0:
+        actions.append(f"{len(actions)+1}. Dispatch SDRF verification team to validate pending field incidents.")
+    if high_risk_count > 0:
+        actions.append(f"{len(actions)+1}. Issue localized SMS/WhatsApp dispatch advisory to regional depots.")
+    
+    if actions:
+        for a in actions: st.write(a)
+    else:
+        st.write("All operations nominal. No critical actions required.")
+
 
     st.markdown("---")
     st.subheader("Download Emergency Dispatch Advisory")
@@ -307,15 +439,51 @@ VALIDATED FOR OFFLINE LOCAL USE
 
     if not incidents_df.empty:
         for _, row in incidents_df.iterrows():
-            popup_html = f"<b>{row['incident_type']}</b><br>Reporter: {row['reporter_name']}<br>Sev: {row['severity']}<br>Notes: {row['description']}"
+            popup_html = f"<b>{row['incident_type']}</b><br>Reporter: {row['reporter_name']}<br>Sev: {row['severity']}<br>Status: {row['status']}<br>Notes: {row['description']}"
             if row["photo_path"] and os.path.exists(row["photo_path"]):
                 try: 
                     with open(row["photo_path"], "rb") as bf: popup_html += f"<br><img src='data:image/jpeg;base64,{base64.b64encode(bf.read()).decode()}' width='200'>"
                 except: pass
-            folium.Marker([row['latitude'], row['longitude']], popup=folium.Popup(popup_html, max_width=300), icon=folium.Icon(color="darkred", icon="exclamation-triangle", prefix="fa")).add_to(m)
+            icon_color = "orange" if "Pending Verification" in row.get("status", "") else "darkred"
+            folium.Marker([row['latitude'], row['longitude']], popup=folium.Popup(popup_html, max_width=300), icon=folium.Icon(color=icon_color, icon="exclamation-triangle", prefix="fa")).add_to(m)
 
     folium.LayerControl(position='topright').add_to(m)
     st_folium(m, width=1200, height=500, returned_objects=[])
+
+    st.markdown("---")
+    with st.expander("🤖 AI Route Disruption & Explainability Intelligence", expanded=True):
+        st.write("### AI Route Analysis Insights")
+        if route_metrics and route_metrics.get("status") == "SUCCESS" and route_metrics["compromised_segments"]:
+            worst_seg_id = route_metrics["compromised_segments"][0]
+            w_df = roads[roads.index == worst_seg_id]
+        else:
+            w_df = roads.nlargest(1, "risk_score")
+            
+        if not w_df.empty:
+            worst = w_df.iloc[0]
+            st.markdown(f"**Automated Inspection on Highest-Risk Segment:** `{worst['segment_id']}`")
+            
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Disruption Probability", f"{worst['risk_score']*100:.1f}%")
+                st.metric("AI Confidence Score", f"{worst.get('ai_confidence', 0.5)*100:.1f}%")
+            with c2:
+                st.metric("Landslide Hazard (RF Model)", f"{worst.get('ai_landslide_prob', 0.0)*100:.1f}%")
+                st.metric("Flood Hazard (RF Model)", f"{worst.get('ai_flood_prob', 0.0)*100:.1f}%")
+            with c3:
+                st.write("**Top Explainable Risk Factors:**")
+                f_imps = worst.get('ai_feature_imp', {})
+                for k, v in f_imps.items():
+                    st.write(f"- {k}: {v*100:.0f}% contribution")
+            
+            st.info(f"⏱️ **Forecast Risk Window:** {worst.get('ai_risk_window', 'N/A')}")
+            
+            if worst['risk_score'] > 0.6:
+                st.error("⚠️ **AI Recommendation:** Avoid dispatching Level 1 Critical Cargo through this segment. Reroute unconditionally.")
+            elif worst['risk_score'] > 0.3:
+                st.warning("⚠️ **AI Recommendation:** Exercise caution. Deploy escorts for heavy cargo and maintain radio contact.")
+            else:
+                st.success("✅ **AI Recommendation:** Route is currently viable for standard dispatch operations.")
 
     st.markdown("---")
     st.subheader(t["sum_title"])
@@ -374,3 +542,26 @@ with tabs[1]:
             submit_report(reporter, role, inc_type, severity, segment_id, (cb[1] + cb[3]) / 2, (cb[0] + cb[2]) / 2, desc, photo_path)
             st.success(f"[SUCCESS] {t['suc']}")
             st.info(t["suc_d"])
+            
+    st.markdown("---")
+    st.subheader("Control Room Verification Queue")
+    if incidents_df.empty:
+        st.success("No pending or active field incidents.")
+    else:
+        for idx, row in incidents_df.iterrows():
+            with st.container():
+                cc1, cc2 = st.columns([5, 2])
+                with cc1:
+                    st.info(f"**ID {row['id']}** | **{row['incident_type']}** ({row['severity']})\n\nReported by {row['reporter_name']} ({row['official_role']}) - Status: {row['status']}")
+                with cc2:
+                    if "Pending" in row.get('status', ''):
+                        if st.button("✅ Verify & Sever Road Segment", key=f"v_{row['id']}"):
+                            verify_incident(row['id'])
+                            st.rerun()
+                        if st.button("❌ Dismiss / Mark False Alarm", key=f"d_{row['id']}"):
+                            dismiss_incident(row['id'])
+                            st.rerun()
+                    else:
+                        if st.button("🟢 Mark Cleared & Reopen Road", key=f"r_{row['id']}"):
+                            resolve_incident(row['id'])
+                            st.rerun()

@@ -149,12 +149,19 @@ class FleetSimulator:
         
         live_blocked_segments = set(roads_df[roads_df["status"] == "Blocked"]["segment_id"].tolist())
         complete_block_set = list(live_blocked_segments.union(set(blocked_edge_ids)))
+        risk_map = {row["segment_id"]: row["risk_score"] for _, row in roads_df.iterrows()}
         
         success = 0
         for v_id, v in self.fleet.items():
             if v["rerouted"]: continue
+            
+            c_type = v["cargo"].lower()
+            if "medical" in c_type or "vaccine" in c_type or "oxygen" in c_type: tier = 1
+            elif "ration" in c_type or "water" in c_type or "food" in c_type: tier = 2
+            else: tier = 3
+            
             # Attempt to reroute
-            res = compute_routes(self.G, v["origin"], v["dest"], blocked_edge_ids=complete_block_set)
+            res = compute_routes(self.G, v["origin"], v["dest"], blocked_edge_ids=complete_block_set, risk_map=risk_map, cargo_tier=tier)
             
             if res.get("status") == "SUCCESS" and res.get("resilient_path"):
                 v["path_nodes"] = res["resilient_path"]
