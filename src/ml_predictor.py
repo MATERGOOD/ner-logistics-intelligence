@@ -22,13 +22,13 @@ class DisruptionPredictor:
         ]
         
         self.feature_display_names = {
-            "rainfall_intensity_mm": "Rainfall Intensity (mm/h)",
-            "rain_accum_24h_mm": "24h Rain Accumulation (mm)",
-            "slope_deg": "Terrain Slope (°)",
-            "elevation_m": "Elevation (m)",
-            "distance_to_river_m": "Proximity to River (m)",
+            "rainfall_intensity_mm": "Rainfall (Current)",
+            "rain_accum_24h_mm": "24h Saturation",
+            "slope_deg": "Terrain Slope",
+            "elevation_m": "Elevation",
+            "distance_to_river_m": "River Proximity",
             "historical_landslide_count": "Historical Incidents",
-            "road_condition_index": "Road Condition Index"
+            "road_condition_index": "Road Quality"
         }
         
         self._load_or_train()
@@ -133,8 +133,8 @@ class DisruptionPredictor:
             feature_importance[disp_name] = round(local_importance[idx], 2)
             
         # Confidence score (how pure the terminal nodes were for this prediction)
-        confidence_score = 0.5 + 0.5 * abs(closure_prob - 0.5) * 2 # Scikit-learn proba scales
-
+        probs = self.closure_clf.predict_proba(X)[0]
+        confidence_score = float(np.max(probs))
         # Window
         risk_window = "Next 4–8 Hours"
         if closure_prob > 0.8:
