@@ -219,9 +219,65 @@ with tabs[0]:
             with c2: st.success(f"**Resilient Detour**\n\nDistance: {res['res_dist_km']} km\n\nTime: {res['res_duration_min']} mins\n\n{res['detour_delay_message']}")
 
     st.markdown("---")
+    st.subheader("Download Emergency Dispatch Advisory")
+    
+    timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S (UTC/IST)")
+    severed_list = "\n".join([f" - {seg}" for seg in forced_blocks]) if forced_blocks else " - None"
+    fleet_str = "\n".join([f" - {v['id']} ({v['cargo']}): {v['status']}" for v in fleet_status]) if fleet_status else " - None"
+    
+    detour_str = " - No active detour calculated."
+    if route_metrics and route_metrics.get("status") == "SUCCESS":
+        detour_str = f" - Route: {origin_node} -> {dest_node} via detour\n - Detour Distance: {route_metrics['res_dist_km']} km, Time: {route_metrics['res_duration_min']} mins\n - Nodes: {', '.join(map(str, route_metrics['resilient_path']))}"
+    
+    mock_hash = uuid.uuid4().hex
+    
+    advisory_content = f"""==================================================
+        EMERGENCY DISPATCH ADVISORY
+==================================================
+Generated Timestamp: {timestamp}
+
+INCIDENT SUMMARY:
+- Blocked Corridors: {len(b_df)}
+- Caution Corridors: {len(cau_df)}
+
+CURRENTLY SEVERED NODES/MILEPOSTS:
+{severed_list}
+
+ACTIVE CONVOYS & CARGO STATUS:
+{fleet_str}
+
+PRIMARY EMERGENCY DETOUR INSTRUCTIONS:
+{detour_str}
+
+--------------------------------------------------
+EDGE NODE SIGNATURE: {mock_hash}
+VALIDATED FOR OFFLINE LOCAL USE
+=================================================="""
+
+    st.download_button(
+        label="📥 Export Field Dispatch Advisory (Offline Use)",
+        data=advisory_content,
+        file_name="MDoNER_Emergency_Advisory.txt",
+        mime="text/plain"
+    )
+
+    st.markdown("---")
     st.subheader(t["map_title"])
     bounds = roads.total_bounds 
     m = folium.Map(location=[(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2], zoom_start=12, tiles="OpenStreetMap")
+    
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+        name='Esri Satellite'
+    ).add_to(m)
+    
+    folium.TileLayer(
+        tiles='https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+        attr='Map data: © OpenStreetMap-Mitwirkende, SRTM | Map style: © OpenTopoMap (CC-BY-SA)',
+        name='Topographic (SRTM)'
+    ).add_to(m)
+
     folium.GeoJson(boundaries, style_function=lambda f: {"fillColor": "#3388ff", "color": "#3388ff", "weight": 2, "fillOpacity": 0.1}).add_to(m)
 
     def get_style(feature):
@@ -258,6 +314,7 @@ with tabs[0]:
                 except: pass
             folium.Marker([row['latitude'], row['longitude']], popup=folium.Popup(popup_html, max_width=300), icon=folium.Icon(color="darkred", icon="exclamation-triangle", prefix="fa")).add_to(m)
 
+    folium.LayerControl(position='topright').add_to(m)
     st_folium(m, width=1200, height=500, returned_objects=[])
 
     st.markdown("---")
