@@ -16,7 +16,19 @@ import time
 st.set_page_config(page_title="NER Logistics Dashboard", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
-.stMetric { background-color: rgba(25, 25, 35, 0.05); padding: 10px; border-radius: 8px; border-left: 4px solid #1E88E5; }
+    /* Compact main container padding */
+    .block-container { padding-top: 1.2rem; padding-bottom: 2rem; padding-left: 2.5rem; padding-right: 2.5rem; }
+    /* Compact spacing between cards */
+    div[data-testid="stVerticalBlock"] > div { gap: 0.65rem; }
+    /* Remove default Streamlit divider margins */
+    hr { margin-top: 0.5rem; margin-bottom: 0.5rem; border-color: rgba(255,255,255,0.08); }
+    /* Modern card container styling */
+    .op-card {
+        background: #111820;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 12px 16px;
+    }
 </style>
 """, unsafe_allow_html=True)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
@@ -65,8 +77,8 @@ def load_data():
 
 def calculate_status(risk_score):
     if risk_score <= 0.55:     return "Clear", "#28a745", 1.0
-    elif risk_score <= 0.79:   return "Caution", "#ffc107", 1.4
-    else:                      return "Blocked", "#dc3545", 999.0
+    elif risk_score <= 0.79:   return "Caution", "#eab308", 1.4
+    else:                      return "Blocked", "#ef4444", 999.0
 
 boundaries, base_roads, current_precip, base_G = load_data()
 roads = base_roads.copy()
@@ -187,7 +199,7 @@ def update_row(row):
     
     rs = preds["closure_probability"]
     status, color, delay = calculate_status(rs)
-    if row["segment_id"] in forced_blocks: status, color, delay, rs = "Blocked", "#dc3545", 999.0, 1.0
+    if row["segment_id"] in forced_blocks: status, color, delay, rs = "Blocked", "#ef4444", 999.0, 1.0
     row["risk_score"], row["status"], row["color"], row["delay_factor"] = round(rs, 3), status, color, delay
     
     row["ai_landslide_prob"] = preds["landslide_probability"]
@@ -224,6 +236,10 @@ for i, n in enumerate(all_nodes):
     elif i == len(all_nodes)-1: label = f"Node {n} - Nongpoh Civil Hospital"
     node_options.append(label)
 
+# ================= SIMULATION BANNER =================
+if stage > 0 or sim_rain > 18.5 or forced_blocks:
+    st.warning(f"**⚠️ WHAT-IF STRESS SIMULATION ACTIVE** | Precipitation: {sim_rain:.1f} mm/h · Scenario: NH-6 Monsoon Disruption · Telemetry Mode: Simulated Stress Testing")
+
 # ================= HEADER & KPI RIBBON =================
 st.markdown("## NER LOGISTICS INTELLIGENCE // DISASTER RESPONSE COMMAND")
 st.info("📍 **Operational Scope:** NH-6 Pilot Corridor (Guwahati ➔ Nongpoh ➔ Umsning | 111.4 km)\n\n*Production Roadmap: Pan-NER Scalable Graph Architecture (MDoNER PS 26002)*", icon="📍")
@@ -233,23 +249,43 @@ high_risk_count = len(roads[roads["risk_score"] > 0.6])
 at_risk_convoys = len([v for v in fleet_status if v.get("alert")])
 
 kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-tl_color = "red" if high_risk_count > 0 or not incidents_df.empty else "green"
-tl_text = "[CRITICAL - MONSOON SURGE]" if high_risk_count > 0 else "[NOMINAL]"
-kpi1.metric("Regional Threat", tl_text) 
-kpi2.metric("Critical Corridors", "1 (NH-6 Artery)")
-kpi3.metric("High-Risk Segments", f"{high_risk_count}")
-kpi4.metric("Active Missions", f"{len(fleet_status)}")
+tl_color = "#ef4444" if high_risk_count > 0 or not incidents_df.empty else "#22c55e"
+tl_str = "🔴 CRITICAL" if high_risk_count > 0 else "🟢 NOMINAL"
+tl_sub = "Monsoon surge active" if high_risk_count > 0 else "Open-Meteo Doppler Feed"
+
+c1_html = f"<div class='op-card' style='border-left: 4px solid {tl_color};'><b>REGIONAL THREAT</b><br><span style='font-size: 1.2rem; font-weight: bold;'>{tl_str}</span><br><span style='font-size: 0.8rem; color: #888;'>{tl_sub}</span></div>"
+kpi1.markdown(c1_html, unsafe_allow_html=True)
+
+c2_html = f"<div class='op-card' style='border-left: 4px solid #1E88E5;'><b>CRITICAL CORRIDORS</b><br><span style='font-size: 1.2rem; font-weight: bold;'>01</span><br><span style='font-size: 0.8rem; color: #888;'>NH-6 Guwahati-Shillong</span></div>"
+kpi2.markdown(c2_html, unsafe_allow_html=True)
+
+r_col = "#ef4444" if high_risk_count > 0 else "#22c55e"
+c3_html = f"<div class='op-card' style='border-left: 4px solid {r_col};'><b>HIGH-RISK SEGMENTS</b><br><span style='font-size: 1.2rem; font-weight: bold;'>{high_risk_count:02d}</span><br><span style='font-size: 0.8rem; color: #888;'>↑ {high_risk_count} since last model run</span></div>"
+kpi3.markdown(c3_html, unsafe_allow_html=True)
+
+ar_col = "#ef4444" if at_risk_convoys > 0 else "#22c55e"
+c4_html = f"<div class='op-card' style='border-left: 4px solid {ar_col};'><b>ACTIVE MISSIONS</b><br><span style='font-size: 1.2rem; font-weight: bold;'>{len(fleet_status):02d}</span><br><span style='font-size: 0.8rem; color: #888;'>{at_risk_convoys} requiring reroute intervention</span></div>"
+kpi4.markdown(c4_html, unsafe_allow_html=True)
+
 tot_hr = st.session_state.delay_recovered // 60
-tot_mn = st.session_state.delay_recovered % 60
-kpi5.metric("Supply Delay Avoided", f"+{int(tot_hr)}h {int(tot_mn)}m")
+tot_mn = int(st.session_state.delay_recovered % 60)
+rec_str = f"+{int(tot_hr)}h {tot_mn}m" if tot_hr > 0 else f"+{tot_mn}m"
+c5_html = f"<div class='op-card' style='border-left: 4px solid #22c55e;'><b>SUPPLY DELAY AVOIDED</b><br><span style='font-size: 1.2rem; font-weight: bold;'>{rec_str}</span><br><span style='font-size: 0.8rem; color: #888;'>1,200 vaccine doses preserved</span></div>"
+kpi5.markdown(c5_html, unsafe_allow_html=True)
 
 st.markdown("---")
 
 # ================= 4 MAIN TABS =================
+pending_count = len(incidents_df[incidents_df["status"].str.contains("Pending")]) if not incidents_df.empty else 0
+threat_count = at_risk_convoys
+
+cmd_tab_str = "🚨 COMMAND CENTER ⚠️" if threat_count > 0 or high_risk_count > 0 else "🚨 COMMAND CENTER"
+inc_tab_str = f"📍 FIELD INCIDENTS ②" if pending_count > 0 else "📍 FIELD INCIDENTS"
+
 tab_cmd, tab_missions, tab_incidents, tab_analytics = st.tabs([
-    "🚨 COMMAND CENTER", 
+    cmd_tab_str, 
     "📦 MISSIONS & FLEET", 
-    "🛡️ FIELD INCIDENTS", 
+    inc_tab_str, 
     "📊 REGIONAL INTEL & DATA HEALTH"
 ])
 
@@ -319,14 +355,14 @@ with tab_cmd:
             folium.Marker([v["lat"], v["lon"]], popup=folium.Popup(v_html, max_width=250), icon=folium.Icon(color=ic_col, icon="truck", prefix="fa"), tooltip=v['id']).add_to(fg_convoys)
             if v["remaining_coords"]:
                 if v["rerouted"]: folium.PolyLine(v["remaining_coords"], color="#00ff00", weight=6, tooltip="⚡ AI Resilient Bypass").add_to(fg_convoys)
-                else: folium.PolyLine(v["remaining_coords"], color="#dc3545" if v["alert"] else "#28a745", weight=4, dash_array="5, 15", opacity=0.6).add_to(fg_convoys)
+                else: folium.PolyLine(v["remaining_coords"], color="#ef4444" if v["alert"] else "#28a745", weight=4, dash_array="5, 15", opacity=0.6).add_to(fg_convoys)
                 
         if getattr(st.session_state, 'sim_stage', 0) >= 9:
             try:
                 res_b = compute_routes(G, n0, nlast, blocked_edge_ids=[], risk_map=risk_map, cargo_tier=3)
                 if res_b.get("baseline_path"):
                     base_coords = [(nodes_gdf.loc[n].geometry.y, nodes_gdf.loc[n].geometry.x) for n in res_b["baseline_path"]]
-                    folium.PolyLine(base_coords, color="#dc3545", weight=4, dash_array="10, 10", tooltip="Blocked Primary Route (Impassable)").add_to(fg_convoys)
+                    folium.PolyLine(base_coords, color="#ef4444", weight=4, dash_array="10, 10", tooltip="Blocked Primary Route (Impassable)").add_to(fg_convoys)
             except: pass
                 
         if not incidents_df.empty:
@@ -350,24 +386,24 @@ with tab_cmd:
             worst_seg = w_df.iloc[0]["segment_id"] if not w_df.empty else "NH-6 Segment 69"
             risk = w_df.iloc[0]["risk_score"] * 100 if not w_df.empty else 78.0
             
-            st.error(f"📍 **WHAT (Vulnerable Segment):**\n\nNH-6 — Umsning / Nongpoh Artery ({worst_seg})\n\n**Risk Badge:** `[HIGH DISRUPTION RISK - {risk:.0f}% Probability]`")
-            st.warning("⏳ **WHEN (Disruption Window):**\n\nForecast Horizon: Next 2–4 Hours (Peak Monsoon Surge)")
-            st.markdown("🔬 **WHY (Explainable AI Causal Factors):**\n- Rainfall surge (> 65 mm/h sustained)\n- Steep terrain gradient (34° slope saturation)\n- High historical landslide recurrence index")
-            st.markdown("🚛 **WHO (Affected Missions & Essential Cargo):**\n- Impacted Convoy: TRK-01 (Medical Cold-Chain Express)\n- Cargo: 1,200 Vaccine Doses (CRITICAL TIER 1)\n- Hazard Location: 14.2 km ahead on current trajectory")
+            st.markdown(f"""
+            <div class='op-card' style='border: 2px solid #ef4444; border-radius: 8px; padding: 20px; background: rgba(239, 68, 68, 0.1); margin-bottom: 15px;'>
+                <h3 style='color: #ef4444; margin-top: 0;'>🚨 EMERGENCY ACTION REQUIRED</h3>
+                <p><b>TRK-01 (1,200 Cold-Chain Vaccine Doses) — Trajectory Cut Off Ahead.</b></p>
+                <p><b>📍 WHAT:</b> {worst_seg} <code>[HIGH RISK - {risk:.0f}%]</code></p>
+                <p><b>⏳ WHEN:</b> Forecast Horizon: Next 2–4 Hours</p>
+                <p><b>⚡ TRADE-OFF:</b> Blocked Route: Cutoff (∞) | AI Alternate Bypass: 63 min (+16m detour)</p>
+            </div>
+            """, unsafe_allow_html=True)
             
-            st.markdown("⚡ **WHAT NEXT (AI Prescriptive Tradeoff & Action):**")
-            st.markdown("""
-            - **Current Direct Route:** 48 min | High Risk (78% failure) -> **REJECTED**
-            - **AI Resilient Bypass:** 63 min | Low Risk (14% failure) -> **APPROVED**
-            - **Tradeoff Cost:** `+15 min delay` to guarantee delivery preservation.
-            """)
-            
-            if st.button("🚨 APPLY AI REROUTE TO TRK-01", type="primary", use_container_width=True):
+            if st.button("⚡ APPLY EMERGENCY REROUTE TO TRK-01", type="primary", use_container_width=True):
                 if getattr(st.session_state, 'sim_stage', 0) > 0:
                     st.session_state.sim_stage = 9
                 st.session_state.fleet_sim.execute_fleet_reroute(forced_blocks, roads)
                 st.toast("✅ TRK-01 diverted via Bypass B. 1,200 vaccine doses protected from cutoff.")
                 st.rerun()
+            if st.button("🔍 Inspect Alternate Bypass Geometry", use_container_width=True):
+                pass
                 
         st.markdown("**Risk Forecast (0h - 8h Projection)**")
         r_vals = [
@@ -387,7 +423,7 @@ with tab_cmd:
         c = alt.Chart(df_chart).mark_line(point=True).encode(
             x=alt.X("Time", sort=None),
             y=alt.Y("Probability (%)", scale=alt.Scale(domain=[0, 100])),
-            color=alt.Color("Category", scale=alt.Scale(range=["#ff0000", "#dc3545"])),
+            color=alt.Color("Category", scale=alt.Scale(range=["#ef4444", "#dc3545"])),
             strokeDash=alt.condition(alt.datum.Category == '⚠️ Critical Reroute Threshold', alt.value([5,5]), alt.value([0]))
         ).properties(height=250)
         st.altair_chart(c, use_container_width=True)
