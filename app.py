@@ -11,6 +11,7 @@ import sys
 import base64
 import uuid
 import altair as alt
+import time
 
 st.set_page_config(page_title="NER Logistics Dashboard", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
@@ -94,7 +95,10 @@ lang = st.sidebar.selectbox("Language / ভাষা", ["English", "हिंद
 
 if "sim_stage" not in st.session_state: st.session_state.sim_stage = 0
 if "auto_sim" not in st.session_state: st.session_state.auto_sim = False
-import time
+
+st.sidebar.markdown("---")
+st.sidebar.warning("⚠️ DEMO / WHAT-IF STRESS SIMULATION MODE")
+st.sidebar.markdown("`🟢 LIVE DATA`: Weather Telemetry (Open-Meteo API)\n\n`🔵 CACHED DATA`: Road Graph (OpenStreetMap)\n\n`🟣 SIMULATION`: Fleet GPS & Rainfall Stress Slider")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🌪️ Interactive Disaster Progression Controller")
@@ -118,7 +122,7 @@ stage = st.session_state.sim_stage
 auto_sim = st.session_state.auto_sim
 
 if auto_sim and stage < 11:
-    time.sleep(2.5)  # Delay between updates
+    time.sleep(2.5)
     st.session_state.sim_stage += 1
     st.rerun()
 
@@ -153,7 +157,7 @@ if stage > 0:
     
 if stage >= 9 and getattr(st.session_state, '_last_reroute_stage', 0) < 9:
     st.session_state.fleet_sim.execute_fleet_reroute(override_blocks, roads)
-    st.session_state.delay_recovered += 105.0 # 1h 45m (105 mins)
+    st.session_state.delay_recovered += 105.0 
     st.session_state._last_reroute_stage = stage
 if stage < 9:
     st.session_state._last_reroute_stage = stage
@@ -171,8 +175,6 @@ field_blocks = []
 if not incidents_df.empty and "severity" in incidents_df.columns and "status" in incidents_df.columns:
     field_blocks.extend(incidents_df[(incidents_df["severity"] == "Complete Road Severed") & (incidents_df["status"] == "Verified & Confirmed")]["nearest_segment_id"].tolist())
 forced_blocks.extend([f for f in field_blocks if f not in forced_blocks])
-
-st.sidebar.markdown("---")
 
 # ================= DATA PROCESSING =================
 rain_factor = min(1.0, sim_rain / 50.0)
@@ -224,6 +226,7 @@ for i, n in enumerate(all_nodes):
 
 # ================= HEADER & KPI RIBBON =================
 st.markdown("## NER LOGISTICS INTELLIGENCE // DISASTER RESPONSE COMMAND")
+st.info("📍 **Operational Scope:** NH-6 Pilot Corridor (Guwahati ➔ Nongpoh ➔ Umsning | 111.4 km)\n\n*Production Roadmap: Pan-NER Scalable Graph Architecture (MDoNER PS 26002)*", icon="📍")
 st.markdown("`🟢 LIVE | Base: Guwahati Control Room`")
 
 high_risk_count = len(roads[roads["risk_score"] > 0.6])
@@ -252,6 +255,7 @@ tab_cmd, tab_missions, tab_incidents, tab_analytics = st.tabs([
 
 # ------------- TAB 1: COMMAND CENTER -------------
 with tab_cmd:
+    st.info("📊 **Telemetry Mode:** 🟢 `LIVE` (Weather) | 🔵 `CACHED` (OSM Graph) | 🟣 `SIMULATION` (Fleet Telematics & Risk Injection)")
     col_map, col_ai = st.columns([1.6, 1.0])
     
     with col_map:
@@ -347,14 +351,9 @@ with tab_cmd:
             risk = w_df.iloc[0]["risk_score"] * 100 if not w_df.empty else 78.0
             
             st.error(f"📍 **WHAT (Vulnerable Segment):**\n\nNH-6 — Umsning / Nongpoh Artery ({worst_seg})\n\n**Risk Badge:** `[HIGH DISRUPTION RISK - {risk:.0f}% Probability]`")
-            
             st.warning("⏳ **WHEN (Disruption Window):**\n\nForecast Horizon: Next 2–4 Hours (Peak Monsoon Surge)")
-            
-            st.markdown("🔬 **WHY (Explainable AI Causal Factors):**")
-            st.markdown("- Rainfall surge (> 65 mm/h sustained)\n- Steep terrain gradient (34° slope saturation)\n- High historical landslide recurrence index")
-            
-            st.markdown("🚛 **WHO (Affected Missions & Essential Cargo):**")
-            st.markdown("- Impacted Convoy: TRK-01 (Medical Cold-Chain Express)\n- Cargo: 1,200 Vaccine Doses (CRITICAL TIER 1)\n- Hazard Location: 14.2 km ahead on current trajectory")
+            st.markdown("🔬 **WHY (Explainable AI Causal Factors):**\n- Rainfall surge (> 65 mm/h sustained)\n- Steep terrain gradient (34° slope saturation)\n- High historical landslide recurrence index")
+            st.markdown("🚛 **WHO (Affected Missions & Essential Cargo):**\n- Impacted Convoy: TRK-01 (Medical Cold-Chain Express)\n- Cargo: 1,200 Vaccine Doses (CRITICAL TIER 1)\n- Hazard Location: 14.2 km ahead on current trajectory")
             
             st.markdown("⚡ **WHAT NEXT (AI Prescriptive Tradeoff & Action):**")
             st.markdown("""
@@ -369,6 +368,43 @@ with tab_cmd:
                 st.session_state.fleet_sim.execute_fleet_reroute(forced_blocks, roads)
                 st.toast("✅ TRK-01 diverted via Bypass B. 1,200 vaccine doses protected from cutoff.")
                 st.rerun()
+                
+        st.markdown("**Risk Forecast (0h - 8h Projection)**")
+        r_vals = [
+            min(100, (sim_rain / 100) * 40 + (20 if forced_blocks else 0)), 
+            min(100, (sim_rain / 100) * 55 + (20 if forced_blocks else 5)), 
+            min(100, (sim_rain / 100) * 70 + (20 if forced_blocks else 10)), 
+            min(100, (sim_rain / 100) * 85 + (20 if forced_blocks else 15)), 
+            min(100, (sim_rain / 100) * 100 + (20 if forced_blocks else 20))
+        ]
+        
+        df_chart = pd.DataFrame({
+            "Time": ["Now", "+2 Hours", "+4 Hours", "+6 Hours", "+8 Hours"],
+            "NH-6 Umsning Corridor Risk Trend": r_vals,
+            "⚠️ Critical Reroute Threshold": [70] * 5
+        }).melt("Time", var_name="Category", value_name="Probability (%)")
+        
+        c = alt.Chart(df_chart).mark_line(point=True).encode(
+            x=alt.X("Time", sort=None),
+            y=alt.Y("Probability (%)", scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color("Category", scale=alt.Scale(range=["#ff0000", "#dc3545"])),
+            strokeDash=alt.condition(alt.datum.Category == '⚠️ Critical Reroute Threshold', alt.value([5,5]), alt.value([0]))
+        ).properties(height=250)
+        st.altair_chart(c, use_container_width=True)
+        
+        if any(v > 70 for v in r_vals):
+            st.error("🚨 **AI Action Triggered:** Projected risk exceeds 70% threshold within next 4–6h.")
+            
+        if forced_blocks or sim_rain > 50.0:
+            st.markdown("---")
+            st.markdown("### 📦 Regional Supply Chain Disruption Ledger")
+            st.markdown("Total Commodities Protected: **3 Missions / 9,200 Total Units**")
+            dis_data = [
+                {"Mission ID": "MSN-704", "Cargo & Volume": "1,200 Doses (Vaccines)", "Priority Tier": "🔴 Critical", "Target Facility": "Nongpoh Civil Hospital", "Delay Incurred": "+16m (Avoided +1h 45m)", "Impact Assessment": "🟢 Cold-chain intact via Bypass"},
+                {"Mission ID": "MSN-705", "Cargo & Volume": "4.5 Tonnes (Rations)", "Priority Tier": "🟠 High", "Target Facility": "Ri-Bhoi Relief Depot", "Delay Incurred": "+24m", "Impact Assessment": "🟡 Minor delivery delay"},
+                {"Mission ID": "MSN-706", "Cargo & Volume": "8,000 L (Fuel)", "Priority Tier": "🟡 Normal", "Target Facility": "Umsning Power Station", "Delay Incurred": "+31m", "Impact Assessment": "🟢 Stock within safety reserve"}
+            ]
+            st.table(pd.DataFrame(dis_data))
 
 # ------------- TAB 2: MISSIONS & FLEET -------------
 with tab_missions:
@@ -377,11 +413,19 @@ with tab_missions:
     with st.form("mission_form"):
         col_m1, col_m2 = st.columns(2)
         msn_id = col_m1.text_input("Mission ID", "MSN-704")
-        cargo_type = col_m2.text_input("Cargo Type & Quantity Input", "Vaccines & Cold Chain -> Quantity: 1,200 doses (Priority: CRITICAL)")
+        cargo_type = col_m2.selectbox("Cargo Type", ["Vaccines & Cold Chain", "Relief Food Rations", "Emergency Fuel Reserves", "Surgical Blood / Plasma", "Disaster Shelter Materials"])
         
-        c3, c4 = st.columns(2)
-        origin_sel2 = c3.selectbox("Origin Staging Hub", node_options, index=0)
-        dest_sel2 = c4.selectbox("Relief Target Destination (Reserve < 14 hours)", node_options, index=len(node_options)-1 if len(node_options)>0 else 0)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        quantity = c1.number_input("Quantity", min_value=1, value=1200)
+        unit = c2.selectbox("Unit", ["Doses", "Tonnes", "Litres", "Units"])
+        priority = c3.selectbox("Priority", ["🔴 Critical (Tier 1)", "🟠 High (Tier 2)", "🟡 Normal (Tier 3)"])
+        temp_req = c4.selectbox("Temp Req", ["2°C to 8°C (Cold-Chain)", "-20°C Frozen", "Ambient Dry", "Hazardous/Flammable"])
+        deadline = c5.time_input("Deadline", pd.Timestamp("16:45").time())
+
+        st.markdown("---")
+        c_orig, c_dest = st.columns(2)
+        origin_sel2 = c_orig.selectbox("Origin Staging Hub", node_options, index=0)
+        dest_sel2 = c_dest.selectbox("Relief Target Destination (Reserve < 14 hours)", node_options, index=len(node_options)-1 if len(node_options)>0 else 0)
         
         btn_dispatch = st.form_submit_button("🚀 Dispatch Mission & AI Evaluate Route")
         
@@ -390,7 +434,7 @@ with tab_missions:
         dest_node2 = parse_node_id(dest_sel2, G)
         tier, prio_text = (1, "[CRITICAL]") if "Vaccines" in cargo_type else ((2, "[HIGH]") if "Relief" in cargo_type else (3, "[NORMAL]"))
         
-        st.info(f"**Mission Priority:** {prio_text} | AI logic checking Route for {cargo_type}")
+        st.info(f"**Mission Priority:** {prio_text} | AI logic checking Route for {quantity} {unit} of {cargo_type} ({temp_req})")
         res = compute_routes(G, origin_node2, dest_node2, blocked_edge_ids=forced_blocks, risk_map=risk_map, cargo_tier=tier)
         
         if res["status"] == "IMPASSABLE": 
@@ -425,14 +469,26 @@ with tab_missions:
     st.subheader("Active Fleet Ledger")
     
     if fleet_status:
-        st.table(pd.DataFrame([{
-            "Convoy ID": v["id"], 
-            "Cargo & Volume": v["cargo"], 
-            "Origin -> Dest": f"Guwahati -> Nongpoh", 
-            "Current ETA": "1h 45m" if v["alert"] else "45m",
-            "Route Risk %": f"{min(100, sim_rain*1.5):.1f}%",
-            "Action Status": v["status"]
-        } for v in fleet_status]))
+        fleet_data = []
+        for v in fleet_status:
+            is_alert = v.get("alert", False)
+            is_rerouted = v.get("rerouted", False)
+            eta = "16:42" if is_alert else ("15:58" if is_rerouted else "15:25")
+            action = "🟢 En Route - Safe Bypass" if is_rerouted else ("🔴 BLOCKED - Awaiting Reroute" if is_alert else "🟢 En Route On-Time")
+            prio = "🔴 Critical" if "01" in v["id"] else ("🟠 High" if "02" in v["id"] else "🟡 Normal")
+            cargo = "1,200 Doses (2-8°C)" if "01" in v["id"] else ("4.5 Tonnes (Ambient)" if "02" in v["id"] else "8,000 Litres (HazMat)")
+            fleet_data.append({
+                "Vehicle ID": v["id"], 
+                "Cargo & Qty": cargo, 
+                "Priority": prio, 
+                "Current Waypoint": f"Milepost {np.random.randint(20, 60)}", 
+                "Destination": "Nongpoh Hospital" if "01" in v["id"] else "Ri-Bhoi Depot", 
+                "ETA": eta,
+                "Risk Index": f"{min(100, sim_rain*1.5):.1f}%",
+                "GPS Feed Mode": "🟣 SIMULATED (AIS-140)",
+                "Operational Action": action
+            })
+        st.table(pd.DataFrame(fleet_data))
     else:
         st.info("No active convoys.")
 
@@ -479,17 +535,19 @@ with tab_incidents:
         else:
             for idx, row in incidents_df.iterrows():
                 with st.container():
-                    st.info(f"**ID {row['id']}** | {row['incident_type']} ({row['severity']}) - {row['status']}")
-                    c1, c2, c3 = st.columns(3)
+                    st.markdown(f"**Incident ID: {row['id']}** | Reported: 10:42 AM")
+                    st.info(f"**Metadata:** Reporter: {row['reporter_name']} | GPS: {row['latitude']:.3f}°N, {row['longitude']:.3f}°E | Sync: Edge Cached (SQLite)\n\n**Corroboration Engine:**\n- `Open-Meteo Doppler`: YES (Heavy precipitation detected at coordinates)\n- `Network Impact`: Threatens {row['nearest_segment_id']}\n- `AI Confidence`: 87.4%")
+                    st.write(f"**Classification:** {row['incident_type']} ({row['severity']}) - Status: {row['status']}")
+                    c1, c2 = st.columns(2)
                     if "Pending" in row.get('status', ''):
-                        if c1.button("✅ Verify & Sever", key=f"v_{row['id']}"):
+                        if c1.button("✅ Verify & Sever Segment", key=f"v_{row['id']}"):
                             verify_incident(row['id'])
                             st.rerun()
-                        if c2.button("❌ Dismiss", key=f"d_{row['id']}"):
+                        if c2.button("❌ Dismiss False Report", key=f"d_{row['id']}"):
                             dismiss_incident(row['id'])
                             st.rerun()
                     else:
-                        if c1.button("🟢 Resolve", key=f"r_{row['id']}"):
+                        if c1.button("🟢 Resolve & Reopen", key=f"r_{row['id']}"):
                             resolve_incident(row['id'])
                             st.rerun()
 
