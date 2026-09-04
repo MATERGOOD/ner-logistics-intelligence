@@ -91,10 +91,78 @@ if "offline_reports" not in st.session_state:
 
 # ================= SIDEBAR =================
 lang = st.sidebar.selectbox("Language / ভাষা", ["English", "हिंदी (Hindi)", "অসমীয়া (Assamese)", "Khasi (Khasi)"])
+
+if "sim_stage" not in st.session_state: st.session_state.sim_stage = 0
+if "auto_sim" not in st.session_state: st.session_state.auto_sim = False
+import time
+
 st.sidebar.markdown("---")
-st.sidebar.header("Scenario Simulation controls")
-sim_rain = st.sidebar.slider("Rainfall Simulator Slider (0 to 100 mm/h)", 0.0, 100.0, float(current_precip), 1.0)
-forced_blocks = st.sidebar.multiselect("Manual Segment Hazard Injection", roads["segment_id"].tolist())
+st.sidebar.subheader("🌪️ Interactive Disaster Progression Controller")
+
+if st.sidebar.button("▶️ Advance Next Disaster Stage", use_container_width=True):
+    st.session_state.sim_stage = min(11, st.session_state.sim_stage + 1)
+    st.session_state.auto_sim = False
+    st.rerun()
+if st.sidebar.button("⚡ Run Full 90-Second Auto-Simulation", use_container_width=True):
+    st.session_state.auto_sim = True
+if st.sidebar.button("🔄 Reset to Normal Ops", use_container_width=True):
+    st.session_state.sim_stage = 0
+    st.session_state.auto_sim = False
+    st.session_state.delay_recovered = 0.0
+    st.session_state._last_reroute_stage = 0
+    nodes_gdf, edges_gdf = ox.graph_to_gdfs(base_G)
+    st.session_state.fleet_sim = FleetSimulator(base_G, nodes_gdf)
+    st.rerun()
+
+stage = st.session_state.sim_stage
+auto_sim = st.session_state.auto_sim
+
+if auto_sim and stage < 11:
+    time.sleep(2.5)  # Delay between updates
+    st.session_state.sim_stage += 1
+    st.rerun()
+
+st.sidebar.markdown(f"**Current Stage: {stage}/11**")
+stage_msg = ""
+override_rain = float(current_precip)
+override_timeline = 15
+override_blocks = []
+
+if stage > 0:
+    if stage <= 1:
+        stage_msg = "**Stage 1 (Nominal):** Rain at 12 mm/h. All corridors Green/Clear. TRK-01 en route on primary NH-6 corridor (ETA: 45 min)."
+        override_rain = 12.0
+        override_timeline = 15
+    elif stage <= 3:
+        stage_msg = "**Stage 2-3 (Surge Warning):** Rain hits 35 mm/h. AI flags Umsning corridor as Amber/High Risk (Closure prob 58%). TRK-01 approaches with alert: `⚠️ Hazard Ahead in 14 km`."
+        override_rain = 35.0
+        override_timeline = 30
+    elif stage <= 8:
+        override_blocks = [roads.nlargest(2, "risk_score")["segment_id"].iloc[0]] if not roads.empty else []
+        if stage <= 5: stage_msg = "**Stage 4-5 (Disaster Breach):** Rain hits 68 mm/h. Umsning corridor physically turns RED (Blocked). TRK-01 trajectory blocked!"
+        else: stage_msg = "**Stage 6-8 (AI Decision Prescribed):**\n- Impact card activates: `🚨 TRK-01 (1,200 Vaccines) CUT OFF`.\n- Tradeoff computed: Blocked route ETA ∞. Alternate route: 61 min.\n- Action Card: `APPLY EMERGENCY REROUTE TO TRK-01`."
+        override_rain = 68.0
+        override_timeline = 45
+    elif stage <= 11:
+        override_blocks = [roads.nlargest(2, "risk_score")["segment_id"].iloc[0]] if not roads.empty else []
+        stage_msg = "**Stage 9-11 (Resolution & Recovery):**\n- Dispatcher applies reroute.\n- TRK-01 polyline switches to alternate bypass.\n- Supply Delay Avoided: +1h 45m (Cold-Chain Preserved).\n- ✅ TRK-01 Safely Diverted. 1,200 Doses Protected."
+        override_rain = 68.0
+        override_timeline = 70
+        
+    st.sidebar.info(stage_msg)
+    
+if stage >= 9 and getattr(st.session_state, '_last_reroute_stage', 0) < 9:
+    st.session_state.fleet_sim.execute_fleet_reroute(override_blocks, roads)
+    st.session_state.delay_recovered += 105.0 # 1h 45m (105 mins)
+    st.session_state._last_reroute_stage = stage
+if stage < 9:
+    st.session_state._last_reroute_stage = stage
+
+st.sidebar.markdown("---")
+st.sidebar.header("Manual Scenario Simulation controls")
+dis_sim = stage > 0
+sim_rain = st.sidebar.slider("Rainfall Simulator Slider (0 to 100 mm/h)", 0.0, 100.0, float(override_rain if dis_sim else current_precip), 1.0, disabled=dis_sim)
+forced_blocks = st.sidebar.multiselect("Manual Segment Hazard Injection", roads["segment_id"].tolist(), default=(override_blocks if dis_sim else []), disabled=dis_sim)
 
 try: incidents_df = get_active_incidents()
 except: incidents_df = pd.DataFrame()
@@ -105,11 +173,6 @@ if not incidents_df.empty and "severity" in incidents_df.columns and "status" in
 forced_blocks.extend([f for f in field_blocks if f not in forced_blocks])
 
 st.sidebar.markdown("---")
-if st.sidebar.button("Reset Scenario"):
-    nodes_gdf, edges_gdf = ox.graph_to_gdfs(base_G)
-    st.session_state.fleet_sim = FleetSimulator(base_G, nodes_gdf)
-    st.session_state.delay_recovered = 0.0
-    st.rerun()
 
 # ================= DATA PROCESSING =================
 rain_factor = min(1.0, sim_rain / 50.0)
@@ -134,7 +197,7 @@ def update_row(row):
 
 roads = roads.apply(update_row, axis=1)
 
-timeline_pct = 15
+timeline_pct = override_timeline if stage > 0 else 15
 fleet_status = st.session_state.fleet_sim.get_vehicle_positions(timeline_pct, forced_blocks, roads)
 risk_map = {row["segment_id"]: row["risk_score"] for _, row in roads.iterrows()}
 
@@ -247,6 +310,8 @@ with tab_cmd:
             """)
             
             if st.button("🚨 APPLY AI REROUTE TO TRK-01", type="primary", use_container_width=True):
+                if getattr(st.session_state, 'sim_stage', 0) > 0:
+                    st.session_state.sim_stage = 9
                 st.session_state.fleet_sim.execute_fleet_reroute(forced_blocks, roads)
                 st.toast("✅ TRK-01 diverted via Bypass B. 1,200 vaccine doses protected from cutoff.")
                 st.rerun()
