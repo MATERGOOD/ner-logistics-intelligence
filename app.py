@@ -193,6 +193,19 @@ def update_row(row):
     row["ai_risk_window"] = preds["risk_window"]
     row["ai_confidence"] = preds["confidence_score"]
     row["ai_feature_imp"] = preds["feature_importance"]
+    
+    badge_dict = {"Clear": "🟢 CLEAR", "Caution": "🟡 CAUTION", "Blocked": "🔴 BLOCKED"}
+    badge = badge_dict.get(status, "🟠 HIGH RISK") if rs < 0.8 else ("🔴 BLOCKED" if status == "Blocked" else "🟠 HIGH RISK")
+    
+    html = f"<b>NH-6 | {row['segment_id']}</b><br>"
+    html += f"Status: {badge}<br>"
+    html += f"Disruption Risk: {int(rs*100)}%<br>"
+    html += f"Rainfall: {rain_mm:.1f} mm/h<br>"
+    html += f"Slope: {int(slope)}°<br>"
+    html += f"Landslide Prob: {int(preds['landslide_probability']*100)}%<br>"
+    html += f"<i>Last update: 2 min ago (Open-Meteo)</i>"
+    row["popup_html"] = html
+    
     return row
 
 roads = roads.apply(update_row, axis=1)
@@ -243,43 +256,84 @@ with tab_cmd:
     
     with col_map:
         bounds = roads.total_bounds 
-        m = folium.Map(location=[(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2], zoom_start=12, tiles="OpenStreetMap")
+        m = folium.Map(location=[(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2], zoom_start=12, tiles=None)
         
         folium.TileLayer(
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Tiles © Esri — Source: Esri',
-            name='Esri Satellite'
+            attr='Esri', name='Satellite Basemap', show=False
         ).add_to(m)
         
         folium.TileLayer(
             tiles='https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-            attr='Map data: © OpenStreetMap-Mitwirkende',
-            name='Topographic (SRTM)'
+            attr='OSM', name='Topographic Basemap', show=True
         ).add_to(m)
+        
+        fg_roads = folium.FeatureGroup(name="Road Accessibility & Risk").add_to(m)
+        fg_hubs = folium.FeatureGroup(name="Supply Hubs & Hospitals").add_to(m)
+        fg_convoys = folium.FeatureGroup(name="Active Convoys").add_to(m)
+        fg_incidents = folium.FeatureGroup(name="Field Incidents").add_to(m)
+        
         folium.GeoJson(boundaries, style_function=lambda f: {"fillColor": "#3388ff", "color": "#3388ff", "weight": 2, "fillOpacity": 0.1}).add_to(m)
         
-        def get_style(feature):
-            status = feature["properties"].get("status", "Clear")
-            return {"color": feature["properties"].get("color", "#28a745"), "weight": 3 if status == "Clear" else (4 if status == "Caution" else 6), "dashArray": '5, 5' if status == "Blocked" else None}
-        folium.GeoJson(roads.to_json(), style_function=get_style, tooltip=folium.GeoJsonTooltip(fields=["segment_id", "length_km", "risk_score", "status"])).add_to(m)
+        for _, row in roads.iterrows():
+            if hasattr(row.geometry, 'coords'):
+                coords = [(lat, lon) for lon, lat in row.geometry.coords]
+            elif hasattr(row.geometry, 'geoms'):
+                coords = [(lat, lon) for lon, lat in row.geometry.geoms[0].coords]
+            else: continue
+            status = row.get("status", "Clear")
+            color = row.get("color", "#28a745")
+            weight = 3 if status == "Clear" else (4 if status == "Caution" else 6)
+            dash = '5, 5' if status == "Blocked" else None
+            folium.PolyLine(coords, color=color, weight=weight, dash_array=dash,
+                            tooltip=row["segment_id"],
+                            popup=folium.Popup(row.get("popup_html", row["segment_id"]), max_width=300)).add_to(fg_roads)
+        
+        nodes_gdf, _ = ox.graph_to_gdfs(base_G)
+        n0 = all_nodes[0]
+        nmid = all_nodes[len(all_nodes)//2]
+        nlast = all_nodes[-1]
+        
+        guw_ll = (nodes_gdf.loc[n0].geometry.y, nodes_gdf.loc[n0].geometry.x)
+        folium.Marker(guw_ll, popup=folium.Popup("<b>Guwahati ISBT Staging Depot</b><br>Role: Distribution Origin<br>Inventory: 15,000 cold-chain units", max_width=250), icon=folium.Icon(color='blue', icon='warehouse', prefix='fa')).add_to(fg_hubs)
+        
+        rib_ll = (nodes_gdf.loc[nmid].geometry.y, nodes_gdf.loc[nmid].geometry.x)
+        folium.Marker(rib_ll, popup=folium.Popup("<b>Ri-Bhoi Forward Storage Depot</b><br>Role: Intermediate Checkpoint<br>Inventory: 3,500 units", max_width=250), icon=folium.Icon(color='blue', icon='warehouse', prefix='fa')).add_to(fg_hubs)
+        
+        nong_ll = (nodes_gdf.loc[nlast].geometry.y, nodes_gdf.loc[nlast].geometry.x)
+        folium.Marker(nong_ll, popup=folium.Popup("<b>Nongpoh Civil Hospital</b><br>Role: Target Destination<br>Reserve Status: < 14 hours<br>Inbound Mission: MSN-704", max_width=250), icon=folium.Icon(color='red', icon='hospital', prefix='fa')).add_to(fg_hubs)
         
         for v in fleet_status:
             if v["lat"] == 0 and v["lon"] == 0: continue
             ic_col = "red" if v["alert"] else "green"
             if v["rerouted"]: ic_col = "blue"
-            folium.Marker([v["lat"], v["lon"]], popup=folium.Popup(f"<b>{v['id']}</b><br>Cargo: {v['cargo']}<br>Status: {v['status']}", max_width=250), icon=folium.Icon(color=ic_col, icon="truck", prefix="fa"), tooltip=v['id']).add_to(m)
+            
+            prio = "🟢 NORMAL" if "TRK-03" in v['id'] else ("🔴 CRITICAL TIER 1" if "TRK-01" in v['id'] else "🟡 HIGH TIER 2")
+            eta_str = "Delayed (ETA 1h 45m)" if v["alert"] else ("Diverting via Bypass" if v["rerouted"] else "ETA 45m")
+            v_html = f"<b>{v['id']}</b><br>Cargo: {v['cargo']}<br>Priority: {prio}<br>Status: {eta_str}"
+            
+            folium.Marker([v["lat"], v["lon"]], popup=folium.Popup(v_html, max_width=250), icon=folium.Icon(color=ic_col, icon="truck", prefix="fa"), tooltip=v['id']).add_to(fg_convoys)
             if v["remaining_coords"]:
-                folium.PolyLine(v["remaining_coords"], color="#dc3545" if v["alert"] else ("#007bff" if v["rerouted"] else "#28a745"), weight=4, dash_array="5, 15", opacity=0.6).add_to(m)
+                if v["rerouted"]: folium.PolyLine(v["remaining_coords"], color="#00ff00", weight=6, tooltip="⚡ AI Resilient Bypass").add_to(fg_convoys)
+                else: folium.PolyLine(v["remaining_coords"], color="#dc3545" if v["alert"] else "#28a745", weight=4, dash_array="5, 15", opacity=0.6).add_to(fg_convoys)
+                
+        if getattr(st.session_state, 'sim_stage', 0) >= 9:
+            try:
+                res_b = compute_routes(G, n0, nlast, blocked_edge_ids=[], risk_map=risk_map, cargo_tier=3)
+                if res_b.get("baseline_path"):
+                    base_coords = [(nodes_gdf.loc[n].geometry.y, nodes_gdf.loc[n].geometry.x) for n in res_b["baseline_path"]]
+                    folium.PolyLine(base_coords, color="#dc3545", weight=4, dash_array="10, 10", tooltip="Blocked Primary Route (Impassable)").add_to(fg_convoys)
+            except: pass
                 
         if not incidents_df.empty:
             for _, row in incidents_df.iterrows():
                 popup_html = f"<b>{row['incident_type']}</b><br>Reporter: {row['reporter_name']}<br>Sev: {row['severity']}<br>Status: {row['status']}<br>Notes: {row['description']}"
                 icon_color = "orange" if "Pending Verification" in row.get("status", "") else "darkred"
-                folium.Marker([row['latitude'], row['longitude']], popup=folium.Popup(popup_html, max_width=300), icon=folium.Icon(color=icon_color, icon="exclamation-triangle", prefix="fa")).add_to(m)
+                folium.Marker([row['latitude'], row['longitude']], popup=folium.Popup(popup_html, max_width=300), icon=folium.Icon(color=icon_color, icon="exclamation-triangle", prefix="fa")).add_to(fg_incidents)
 
         folium.LayerControl(position='topright').add_to(m)
         st_folium(m, width=900, height=520, returned_objects=[], use_container_width=True)
-        st.markdown("**Map Legend**: 🟢 Clear | 🟡 Caution | 🔴 High Risk / Blocked")
+        st.markdown("**Map Legend**: 🟢 Clear | 🟡 Caution | 🔴 High Risk / Blocked &nbsp;&nbsp;&nbsp;&nbsp; **Assets**: 📦 Hubs | 🏥 Hospitals | 🚚 Fleet")
 
     with col_ai:
         st.markdown("### AI Intelligence & Decision Card")
