@@ -221,30 +221,35 @@ with tab_cmd:
     with col_ai:
         st.markdown("### AI Intelligence & Decision Card")
         if sim_rain < 30.0 and len(forced_blocks) == 0:
-            st.success("🟢 **Status:** All Corridors Nominal. Continue routine monitoring on NH-6.")
+            st.success("🟢 **Status: ALL CORRIDORS NOMINAL**")
+            st.write("No active interventions required. Routine patrol on NH-6 active.")
+            st.write("All convoys on primary corridors.")
         else:
             w_df = roads[roads["segment_id"].isin(forced_blocks)] if forced_blocks else roads.nlargest(1, "risk_score")
-            worst_seg = w_df.iloc[0]["segment_id"] if not w_df.empty else "NH-6 Segment"
+            worst_seg = w_df.iloc[0]["segment_id"] if not w_df.empty else "NH-6 Segment 69"
             risk = w_df.iloc[0]["risk_score"] * 100 if not w_df.empty else 78.0
-            st.error(f"🚨 **ACTION REQUIRED:** Reroute active convoys immediately. Landslide probability on `{worst_seg}` reached {risk:.0f}%. Alternate route saves 1h 45m.")
             
-        st.markdown("**Risk Forecast (0h - 8h Projection)**")
-        chart_data = pd.DataFrame({
-            "Hour": ["0h", "2h", "4h", "6h", "8h"],
-            "Saturation Risk %": [
-                min(100, (sim_rain / 100) * 40 + (20 if forced_blocks else 0)), 
-                min(100, (sim_rain / 100) * 55 + (20 if forced_blocks else 5)), 
-                min(100, (sim_rain / 100) * 70 + (20 if forced_blocks else 10)), 
-                min(100, (sim_rain / 100) * 85 + (20 if forced_blocks else 15)), 
-                min(100, (sim_rain / 100) * 100 + (20 if forced_blocks else 20))
-            ]
-        })
-        st.line_chart(chart_data.set_index("Hour"))
-        
-        st.markdown("---")
-        if st.button("⚡ [APPLY EMERGENCY REROUTE]", type="primary", use_container_width=True):
-            st.session_state.fleet_sim.execute_fleet_reroute(forced_blocks, roads)
-            st.rerun()
+            st.error(f"📍 **WHAT (Vulnerable Segment):**\n\nNH-6 — Umsning / Nongpoh Artery ({worst_seg})\n\n**Risk Badge:** `[HIGH DISRUPTION RISK - {risk:.0f}% Probability]`")
+            
+            st.warning("⏳ **WHEN (Disruption Window):**\n\nForecast Horizon: Next 2–4 Hours (Peak Monsoon Surge)")
+            
+            st.markdown("🔬 **WHY (Explainable AI Causal Factors):**")
+            st.markdown("- Rainfall surge (> 65 mm/h sustained)\n- Steep terrain gradient (34° slope saturation)\n- High historical landslide recurrence index")
+            
+            st.markdown("🚛 **WHO (Affected Missions & Essential Cargo):**")
+            st.markdown("- Impacted Convoy: TRK-01 (Medical Cold-Chain Express)\n- Cargo: 1,200 Vaccine Doses (CRITICAL TIER 1)\n- Hazard Location: 14.2 km ahead on current trajectory")
+            
+            st.markdown("⚡ **WHAT NEXT (AI Prescriptive Tradeoff & Action):**")
+            st.markdown("""
+            - **Current Direct Route:** 48 min | High Risk (78% failure) -> **REJECTED**
+            - **AI Resilient Bypass:** 63 min | Low Risk (14% failure) -> **APPROVED**
+            - **Tradeoff Cost:** `+15 min delay` to guarantee delivery preservation.
+            """)
+            
+            if st.button("🚨 APPLY AI REROUTE TO TRK-01", type="primary", use_container_width=True):
+                st.session_state.fleet_sim.execute_fleet_reroute(forced_blocks, roads)
+                st.toast("✅ TRK-01 diverted via Bypass B. 1,200 vaccine doses protected from cutoff.")
+                st.rerun()
 
 # ------------- TAB 2: MISSIONS & FLEET -------------
 with tab_missions:
