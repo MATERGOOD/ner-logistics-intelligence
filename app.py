@@ -21,10 +21,13 @@ st.markdown("""
     .stApp { background-color: #0B0F14; color: #E2E8F0; }
     
     /* Compact main container padding */
-    .block-container { padding: 1.5rem 2rem 2rem 2rem; max-width: 100%; }
-    
-    /* Compact spacing between cards */
-    div[data-testid="stVerticalBlock"] > div { gap: 0.5rem; }
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: 100%;
+    }
     
     /* Remove default Streamlit divider margins */
     hr { margin-top: 0.5rem; margin-bottom: 0.5rem; border-color: rgba(255,255,255,0.08); }
@@ -151,7 +154,16 @@ def _t(text):
             "High-Risk Segments": "উচ্চ-বিপদাশংকা খণ্ড",
             "Active Convoys": "সক্ৰিয় কনভয়",
             "Essential Cargo": "অত্যাৱশ্যকীয় সামগ্ৰী",
-            "Delay Avoided": "পলম পৰিহাৰ কৰা হ’ল"
+            "Delay Avoided": "পলম পৰিহাৰ কৰা হ’ল",
+            "Submit Field Geo-Tagged Report": "ক্ষেত্ৰ প্ৰতিবেদন দাখিল কৰক",
+            "Incident Type": "ঘটনাৰ প্ৰকাৰ",
+            "Affected Segment": "প্ৰভাৱিত খণ্ড",
+            "Severity": "গুৰুত্ব",
+            "Submit Incident Report": "প্ৰতিবেদন দাখিল কৰক",
+            "District Control Room Audit Ledger": "জিলা নিয়ন্ত্ৰণ কক্ষৰ অডিট লেজাৰ",
+            "Warehouse Inventory & Vulnerability Status": "গুদামৰ সামগ্ৰীৰ স্থিতি",
+            "District Connectivity Matrix": "জিলা সংযোগ মেট্ৰিক্স",
+            "Offline Communications Dispatcher": "অফলাইন যোগাযোগ প্ৰেৰণকাৰী"
         },
         "Khasi": {
             "🚨 Command Dashboard": "🚨 Dashboard Baphang",
@@ -160,7 +172,16 @@ def _t(text):
             "High-Risk Segments": "Bynta Ba-ma",
             "Active Convoys": "Kali Ba-khie",
             "Essential Cargo": "Mar Bakongsan",
-            "Delay Avoided": "Lait Na Ka Slem"
+            "Delay Avoided": "Lait Na Ka Slem",
+            "Submit Field Geo-Tagged Report": "Kajin Phah Khubor",
+            "Incident Type": "Jingjia",
+            "Affected Segment": "Bynta Ba Shah Ktah",
+            "Severity": "Ka Jingjur",
+            "Submit Incident Report": "Phah Khubor",
+            "District Control Room Audit Ledger": "Khubor Na District",
+            "Warehouse Inventory & Vulnerability Status": "Jingkynshew Ha Dieng",
+            "District Connectivity Matrix": "Ka Jingiadei District",
+            "Offline Communications Dispatcher": "Ki Khubor Ba Lym Poi"
         }
     }
     return translations.get(lang_sel, {}).get(text, text)
@@ -452,14 +473,14 @@ elif screen == _t("📦 Field & Supply Chain Operations"):
     
     with col_field:
         st.markdown("<div class='op-card'>", unsafe_allow_html=True)
-        st.markdown("### 📝 Submit Field Geo-Tagged Report")
+        st.markdown(f"### 📝 {_t('Submit Field Geo-Tagged Report')}")
         with st.form("field_report"):
-            inc_type = st.selectbox("Incident Type", ["Landslide", "Flash Flood / Waterlogging", "Bridge Structural Damage"])
-            segment_id = st.selectbox("Affected Segment", roads["segment_id"].tolist())
-            severity = st.radio("Severity", ["Complete Road Severed", "Single-Lane Blocked", "Minor Caution"], horizontal=True)
+            inc_type = st.selectbox(_t("Incident Type"), ["Landslide", "Flash Flood / Waterlogging", "Bridge Structural Damage"])
+            segment_id = st.selectbox(_t("Affected Segment"), roads["segment_id"].tolist())
+            severity = st.radio(_t("Severity"), ["Complete Road Severed", "Single-Lane Blocked", "Minor Caution"], horizontal=True)
             photo = st.file_uploader("Upload On-Site Photo/Preview", type=["png", "jpg"])
             st.text_input("GPS Coordinates (Auto-populated from device)", "25.90N, 91.88E", disabled=True)
-            submitted = st.form_submit_button("Submit Incident Report")
+            submitted = st.form_submit_button(_t("Submit Incident Report"))
             if submitted:
                 if not getattr(st.session_state, 'offline_mode', False):
                     cb = roads[roads["segment_id"] == segment_id].iloc[0].geometry.bounds
@@ -471,7 +492,7 @@ elif screen == _t("📦 Field & Supply Chain Operations"):
         st.markdown("</div>", unsafe_allow_html=True)
         
         st.markdown("<div class='op-card'>", unsafe_allow_html=True)
-        st.markdown("### 🛡️ District Control Room Audit Ledger")
+        st.markdown(f"### 🛡️ {_t('District Control Room Audit Ledger')}")
         if incidents_df.empty:
             st.info("No active incidents to audit.")
         else:
@@ -492,7 +513,7 @@ elif screen == _t("📦 Field & Supply Chain Operations"):
         
     with col_supply:
         st.markdown("<div class='op-card'>", unsafe_allow_html=True)
-        st.markdown("### 📦 Warehouse Inventory & Vulnerability Status")
+        st.markdown(f"### 📦 {_t('Warehouse Inventory & Vulnerability Status')}")
         st.markdown("""
         **Guwahati Depot:** 15,000 cold-chain units (SECURE)
         <br>**Nongpoh Hospital Reserve:** <span style='color:#ef4444; font-weight:bold;'>< 14 Hours Remaining</span>
@@ -501,7 +522,7 @@ elif screen == _t("📦 Field & Supply Chain Operations"):
         st.markdown("</div>", unsafe_allow_html=True)
         
         st.markdown("<div class='op-card'>", unsafe_allow_html=True)
-        st.markdown("### 📡 District Connectivity Matrix")
+        st.markdown(f"### 📡 {_t('District Connectivity Matrix')}")
         st.dataframe(pd.DataFrame([
             {"DistrictName": "Kamrup", "Connectivity": "96%"},
             {"DistrictName": "Ri-Bhoi", "Connectivity": "68%"},
@@ -510,7 +531,7 @@ elif screen == _t("📦 Field & Supply Chain Operations"):
         st.markdown("</div>", unsafe_allow_html=True)
         
         st.markdown("<div class='op-card'>", unsafe_allow_html=True)
-        st.markdown("### 📻 Offline Communications Dispatcher")
+        st.markdown(f"### 📻 {_t('Offline Communications Dispatcher')}")
         st.text_area("Advisory Preview (Plain Text)", "URGENT DISPATCH ADVISORY - TRK-01 REROUTE VIA BYPASS B. AVOID NH-6 SEGMENT 69 DUE TO CRITICAL LANDSLIDE PROBABILITY.", height=100)
         st.download_button(
             label="⬇ Download Digitally Stamped Advisory (.txt)",
