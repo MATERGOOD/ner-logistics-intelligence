@@ -140,31 +140,29 @@ if st.session_state.auto_sim and stage < 11:
     st.rerun()
 
 # 1. Global Shell & Top App Bar
-colA, colB, colC = st.columns([1.5, 1.5, 1.0])
-with colA:
+col_title, col_corridor, col_lang = st.columns([2.0, 2.2, 0.8], vertical_alignment="center")
+
+with col_title:
     st.markdown("""
-        <div style='display:flex; align-items:center; height:100%; padding-top:10px;'>
-            <div style='width: 12px; height: 12px; background: #10b981; border-radius: 50%; margin-right: 12px; animation: pulse 2s infinite;'></div>
-            <strong style='font-size: 1.1rem; color: #10b981;'>NER LOGISTICS INTELLIGENCE</strong> 
-            <span style='margin-left: 10px; color: #9CA3AF; font-size: 0.9rem;'>[ONLINE // DISASTER RESPONSE COMMAND]</span>
+        <div style='display:flex; align-items:center;'>
+            <div style='width:12px; height:12px; background:#10B981; border-radius:50%; margin-right:10px; animation:pulse 2s infinite;'></div>
+            <span style='font-size:20px; font-weight:bold; color:white;'>NER LOGISTICS INTELLIGENCE</span>
         </div>
+        <div style='color:#9CA3AF; font-size:12px; margin-left:22px; letter-spacing:1px;'>DISASTER RESPONSE COMMAND // ONLINE</div>
     """, unsafe_allow_html=True)
-with colB:
-    st.markdown("""
-        <div style='background: rgba(255,255,255,0.05); padding: 8px 16px; border-radius: 20px; text-align: center; border: 1px solid rgba(255,255,255,0.1); margin-top:5px;'>
-            <span style='font-weight: 600; font-size: 0.9rem;'>PILOT CORRIDOR:</span> NH-6 (Guwahati ➔ Nongpoh ➔ Umsning | 111.4 km)
-        </div>
-    """, unsafe_allow_html=True)
-with colC:
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        st.markdown("""
-            <div style='text-align: right; font-size: 0.75rem; color: #9CA3AF; margin-top:10px;'>
-                [LIVE: Weather Radar]<br>[CACHED: Road Network]<br>[SIMULATED: Fleet]
-            </div>
-        """, unsafe_allow_html=True)
-    with c2:
-        lang = st.selectbox("", ["EN", "HI", "AS", "KH"], label_visibility="collapsed")
+
+with col_corridor:
+    sub_c1, sub_arrow, sub_c2 = st.columns([1.0, 0.2, 1.0], vertical_alignment="center")
+    with sub_c1:
+        origin_point = st.selectbox("Origin Hub", ["Guwahati ISBT", "Byrnihat Staging Depot", "Khanapara Junction"], key="sel_origin", label_visibility="collapsed")
+    with sub_arrow:
+        st.markdown("<div style='text-align:center; color:#10B981; font-weight:bold; font-size:18px;'>➔</div>", unsafe_allow_html=True)
+    with sub_c2:
+        dest_point = st.selectbox("Relief Target", ["Nongpoh Civil Hospital", "Umsning Relief Depot", "Shillong Trauma Center"], key="sel_dest", label_visibility="collapsed")
+    st.markdown(f"<div style='text-align:center; font-size:0.8rem; color:#9CA3AF; margin-top:4px;'>📍 Active Routing Corridor: {origin_point} to {dest_point} via NH-6</div>", unsafe_allow_html=True)
+
+with col_lang:
+    st.selectbox("Language / ভাষা", ["English", "অসমীয়া (Assamese)", "Khasi"], label_visibility="collapsed", key="global_lang")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -289,14 +287,15 @@ if screen == "🚨 Command Dashboard":
             attr='OSM', name='Topographic Basemap'
         ).add_to(m)
         
-        primary_route_coords = [
-            [26.140, 91.730], [26.050, 91.780], [25.920, 91.850],
-            [25.755, 91.870], [25.680, 91.900]
-        ]
-        bypass_route_coords = [
-            [26.140, 91.730], [26.050, 91.780], [26.000, 91.650], 
-            [25.850, 91.650], [25.700, 91.750], [25.680, 91.900]
-        ]
+        loc_coords = {
+            "Guwahati ISBT": [26.140, 91.730], "Khanapara Junction": [26.120, 91.800], "Byrnihat Staging Depot": [26.050, 91.880],
+            "Nongpoh Civil Hospital": [25.900, 91.880], "Umsning Relief Depot": [25.750, 91.890], "Shillong Trauma Center": [25.570, 91.880]
+        }
+        start_c = loc_coords.get(origin_point, [26.140, 91.730])
+        end_c = loc_coords.get(dest_point, [25.900, 91.880])
+        
+        primary_route_coords = [start_c, [26.050, 91.780], [25.920, 91.850], [25.755, 91.870], end_c]
+        bypass_route_coords = [start_c, [26.050, 91.780], [26.000, 91.650], [25.850, 91.650], [25.700, 91.750], end_c]
 
         if not st.session_state.get('is_rerouted', False):
             folium.PolyLine(
@@ -328,12 +327,8 @@ if screen == "🚨 Command Dashboard":
             ).add_to(m)
             m.fit_bounds(bypass_route_coords)
 
-        nodes_gdf, _ = ox.graph_to_gdfs(base_G)
-        guw_ll = (nodes_gdf.loc[all_nodes[0]].geometry.y, nodes_gdf.loc[all_nodes[0]].geometry.x)
-        folium.Marker(guw_ll, icon=folium.Icon(color='blue', icon='box', prefix='fa'), tooltip="Guwahati Hub").add_to(m)
-        
-        nong_ll = (nodes_gdf.loc[all_nodes[-1]].geometry.y, nodes_gdf.loc[all_nodes[-1]].geometry.x)
-        folium.Marker(nong_ll, icon=folium.Icon(color='red', icon='hospital', prefix='fa'), tooltip="Nongpoh Hospital").add_to(m)
+        folium.Marker(start_c, icon=folium.Icon(color='blue', icon='box', prefix='fa'), tooltip=origin_point).add_to(m)
+        folium.Marker(end_c, icon=folium.Icon(color='red', icon='hospital', prefix='fa'), tooltip=dest_point).add_to(m)
         
         for v in fleet_status:
             if v["lat"] == 0 and v["lon"] == 0: continue
