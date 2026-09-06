@@ -139,8 +139,34 @@ if st.session_state.auto_sim and stage < 11:
     st.session_state.sim_stage += 1
     st.rerun()
 
+def _t(text):
+    lang_sel = st.session_state.get("global_lang", "English")
+    if lang_sel == "English": return text
+    
+    translations = {
+        "অসমীয়া (Assamese)": {
+            "🚨 Command Dashboard": "🚨 কমাণ্ড ডেশ্ববৰ্ড",
+            "📦 Field & Supply Chain Operations": "📦 ক্ষেত্ৰ আৰু যোগান শৃংখল কাৰ্য্যকলাপ",
+            "Regional Threat": "আঞ্চলিক ভাবুকি",
+            "High-Risk Segments": "উচ্চ-বিপদাশংকা খণ্ড",
+            "Active Convoys": "সক্ৰিয় কনভয়",
+            "Essential Cargo": "অত্যাৱশ্যকীয় সামগ্ৰী",
+            "Delay Avoided": "পলম পৰিহাৰ কৰা হ’ল"
+        },
+        "Khasi": {
+            "🚨 Command Dashboard": "🚨 Dashboard Baphang",
+            "📦 Field & Supply Chain Operations": "📦 Ka Kam Pynpoi Mar",
+            "Regional Threat": "Jingma Hynñiewtrep",
+            "High-Risk Segments": "Bynta Ba-ma",
+            "Active Convoys": "Kali Ba-khie",
+            "Essential Cargo": "Mar Bakongsan",
+            "Delay Avoided": "Lait Na Ka Slem"
+        }
+    }
+    return translations.get(lang_sel, {}).get(text, text)
+
 # 1. Global Shell & Top App Bar
-col_title, col_corridor, col_lang = st.columns([2.0, 2.2, 0.8], vertical_alignment="center")
+col_title, col_route, col_lang = st.columns([1.8, 2.4, 0.8], vertical_alignment="center")
 
 with col_title:
     st.markdown("""
@@ -151,23 +177,18 @@ with col_title:
         <div style='color:#9CA3AF; font-size:12px; margin-left:22px; letter-spacing:1px;'>DISASTER RESPONSE COMMAND // ONLINE</div>
     """, unsafe_allow_html=True)
 
-with col_corridor:
-    sub_c1, sub_arrow, sub_c2 = st.columns([1.0, 0.2, 1.0], vertical_alignment="center")
-    with sub_c1:
-        origin_point = st.selectbox("Origin Hub", ["Guwahati ISBT", "Byrnihat Staging Depot", "Khanapara Junction"], key="sel_origin", label_visibility="collapsed")
-    with sub_arrow:
-        st.markdown("<div style='text-align:center; color:#10B981; font-weight:bold; font-size:18px;'>➔</div>", unsafe_allow_html=True)
-    with sub_c2:
-        dest_point = st.selectbox("Relief Target", ["Nongpoh Civil Hospital", "Umsning Relief Depot", "Shillong Trauma Center"], key="sel_dest", label_visibility="collapsed")
-    st.markdown(f"<div style='text-align:center; font-size:0.8rem; color:#9CA3AF; margin-top:4px;'>📍 Active Routing Corridor: {origin_point} to {dest_point} via NH-6</div>", unsafe_allow_html=True)
+with col_route:
+    origin_point = st.selectbox("Origin", ["Guwahati ISBT", "Byrnihat Staging Depot", "Khanapara Junction"], key="sel_origin", label_visibility="collapsed")
+    dest_point = st.selectbox("Target", ["Nongpoh Civil Hospital", "Umsning Relief Depot", "Shillong Trauma Center"], key="sel_dest", label_visibility="collapsed")
+    st.markdown(f"<div style='text-align:center; font-size:0.85rem; padding-top:4px; color:#9CA3AF;'>📍 Corridor routing: {origin_point} ➔ {dest_point}</div>", unsafe_allow_html=True)
 
 with col_lang:
-    st.selectbox("Language / ভাষা", ["English", "অসমীয়া (Assamese)", "Khasi"], label_visibility="collapsed", key="global_lang")
+    st.selectbox("Language / ভাষা", ["English", "অসমীয়া (Assamese)", "Khasi"], key="global_lang", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Screen Switcher
-screen = st.radio("Navigation", ["🚨 Command Dashboard", "📦 Field & Supply Chain Operations"], horizontal=True, label_visibility="collapsed")
+screen = st.radio("Navigation", [_t("🚨 Command Dashboard"), _t("📦 Field & Supply Chain Operations")], horizontal=True, label_visibility="collapsed")
 
 # Setup Simulation data
 sim_rain = st.session_state.get('sim_rain_slider', float(current_precip))
@@ -245,7 +266,7 @@ risk_map = {row["segment_id"]: row["risk_score"] for _, row in roads.iterrows()}
 
 all_nodes = list(G.nodes())
 
-if screen == "🚨 Command Dashboard":
+if screen == _t("🚨 Command Dashboard"):
     # 2. Screen 1 Layout
     high_risk_count = len(roads[roads["risk_score"] > 0.6])
     at_risk_convoys = len([v for v in fleet_status if v.get("alert")])
@@ -258,22 +279,22 @@ if screen == "🚨 Command Dashboard":
     else:
         tl_str, tl_color = ("CRITICAL - MONSOON SURGE", "#ef4444") if (high_risk_count > 0 or at_risk_convoys > 0) else ("NOMINAL OPERATIONS", "#22c55e")
         
-    k1.markdown(f"<div class='op-card' style='border-left: 4px solid {tl_color};'><div class='kpi-title'>Regional Threat</div><div class='kpi-value' style='color:{tl_color}; font-size: 1.1rem;'>{tl_str}</div><div class='kpi-sub'>Updated 1m ago</div></div>", unsafe_allow_html=True)
+    k1.markdown(f"<div class='op-card' style='border-left: 4px solid {tl_color};'><div class='kpi-title'>{_t('Regional Threat')}</div><div class='kpi-value' style='color:{tl_color}; font-size: 1.1rem;'>{tl_str}</div><div class='kpi-sub'>Updated 1m ago</div></div>", unsafe_allow_html=True)
     
-    k2.markdown(f"<div class='op-card' style='border-left: 4px solid #F59E0B;'><div class='kpi-title'>High-Risk Segments</div><div class='kpi-value'>{high_risk_count:02d} Segments</div><div class='kpi-sub'>Prob > 60%</div></div>", unsafe_allow_html=True)
+    k2.markdown(f"<div class='op-card' style='border-left: 4px solid #F59E0B;'><div class='kpi-title'>{_t('High-Risk Segments')}</div><div class='kpi-value'>{high_risk_count:02d} Segments</div><div class='kpi-sub'>Prob > 60%</div></div>", unsafe_allow_html=True)
     
     c_alert = f"{at_risk_convoys} At Direct Risk" if at_risk_convoys > 0 else "All Secure"
-    k3.markdown(f"<div class='op-card' style='border-left: 4px solid #3B82F6;'><div class='kpi-title'>Active Convoys</div><div class='kpi-value'>{len(fleet_status)} Convoys</div><div class='kpi-sub'>({c_alert})</div></div>", unsafe_allow_html=True)
+    k3.markdown(f"<div class='op-card' style='border-left: 4px solid #3B82F6;'><div class='kpi-title'>{_t('Active Convoys')}</div><div class='kpi-value'>{len(fleet_status)} Convoys</div><div class='kpi-sub'>({c_alert})</div></div>", unsafe_allow_html=True)
     
-    k4.markdown(f"<div class='op-card' style='border-left: 4px solid #8B5CF6;'><div class='kpi-title'>Essential Cargo</div><div class='kpi-value' style='font-size:1.1rem;'>1,200 Vaccine Doses</div><div class='kpi-sub'>At threat threshold</div></div>", unsafe_allow_html=True)
+    k4.markdown(f"<div class='op-card' style='border-left: 4px solid #8B5CF6;'><div class='kpi-title'>{_t('Essential Cargo')}</div><div class='kpi-value' style='font-size:1.1rem;'>1,200 Vaccine Doses</div><div class='kpi-sub'>At threat threshold</div></div>", unsafe_allow_html=True)
     
     if st.session_state.get('is_rerouted'):
-        k5.markdown(f"<div class='op-card' style='border-left: 4px solid #10B981;'><div class='kpi-title'>Delay Avoided</div><div class='kpi-value' style='color:#10B981;'>+1h 45m Saved</div><div class='kpi-sub'>1,200 vaccine doses preserved</div></div>", unsafe_allow_html=True)
+        k5.markdown(f"<div class='op-card' style='border-left: 4px solid #10B981;'><div class='kpi-title'>{_t('Delay Avoided')}</div><div class='kpi-value' style='color:#10B981;'>+1h 45m Saved</div><div class='kpi-sub'>1,200 vaccine doses preserved</div></div>", unsafe_allow_html=True)
     else:
         tot_hr = st.session_state.delay_recovered // 60
         tot_mn = int(st.session_state.delay_recovered % 60)
         rec_str = f"+{int(tot_hr)}h {tot_mn}m" if tot_hr > 0 else f"+{tot_mn}m"
-        k5.markdown(f"<div class='op-card' style='border-left: 4px solid #10B981;'><div class='kpi-title'>Delay Avoided</div><div class='kpi-value'>{rec_str} Saved</div><div class='kpi-sub'>via Reroute</div></div>", unsafe_allow_html=True)
+        k5.markdown(f"<div class='op-card' style='border-left: 4px solid #10B981;'><div class='kpi-title'>{_t('Delay Avoided')}</div><div class='kpi-value'>{rec_str} Saved</div><div class='kpi-sub'>via Reroute</div></div>", unsafe_allow_html=True)
 
     # Row 2: Maps and Charts
     col_map, col_right = st.columns([1.6, 1.0])
@@ -426,7 +447,7 @@ if screen == "🚨 Command Dashboard":
     with bot4:
         st.multiselect("Manual Segment Injection", roads["segment_id"].tolist(), key="manual_blocks", disabled=(stage>0))
 
-elif screen == "📦 Field & Supply Chain Operations":
+elif screen == _t("📦 Field & Supply Chain Operations"):
     col_field, col_supply = st.columns([1.0, 1.0])
     
     with col_field:
