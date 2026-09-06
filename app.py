@@ -289,16 +289,45 @@ if screen == "🚨 Command Dashboard":
             attr='OSM', name='Topographic Basemap'
         ).add_to(m)
         
-        fg_roads = folium.FeatureGroup(name="Road Risk").add_to(m)
-        for _, row in roads.iterrows():
-            if hasattr(row.geometry, 'coords'): coords = [(lat, lon) for lon, lat in row.geometry.coords]
-            elif hasattr(row.geometry, 'geoms'): coords = [(lat, lon) for lon, lat in row.geometry.geoms[0].coords]
-            else: continue
-            
-            w = 3 if row['status'] == 'Clear' else (4 if row['status'] == 'Caution' else 6)
-            dash = '5, 5' if row['status'] == 'Blocked' else None
-            folium.PolyLine(coords, color=row['color'], weight=w, dash_array=dash, popup=row.get('popup_html','')).add_to(fg_roads)
-        
+        primary_route_coords = [
+            [26.140, 91.730], [26.050, 91.780], [25.920, 91.850],
+            [25.755, 91.870], [25.680, 91.900]
+        ]
+        bypass_route_coords = [
+            [26.140, 91.730], [26.050, 91.780], [26.000, 91.650], 
+            [25.850, 91.650], [25.700, 91.750], [25.680, 91.900]
+        ]
+
+        if not st.session_state.get('is_rerouted', False):
+            folium.PolyLine(
+                locations=primary_route_coords,
+                color='#10B981', weight=5, opacity=0.9,
+                tooltip="Active Artery: NH-6 Primary"
+            ).add_to(m)
+            m.fit_bounds(primary_route_coords)
+        else:
+            folium.PolyLine(
+                locations=primary_route_coords,
+                color='#EF4444', weight=5, opacity=0.8, dash_array='8, 8',
+                tooltip="❌ SEVERED ARTERY: NH-6 Segment 69 Blocked by Landslide"
+            ).add_to(m)
+            folium.Marker(
+                location=[25.755, 91.870],
+                icon=folium.Icon(color='red', icon='exclamation-triangle', prefix='fa'),
+                popup="⚠️ Landslide Breach (Segment 69) - Completely Inaccessible"
+            ).add_to(m)
+            folium.PolyLine(
+                locations=bypass_route_coords,
+                color='#10B981', weight=6, opacity=1.0,
+                tooltip="⚡ AI RESILIENT BYPASS B (Active Detour: +16 min)"
+            ).add_to(m)
+            folium.Marker(
+                location=bypass_route_coords[len(bypass_route_coords)//2],
+                icon=folium.Icon(color='blue', icon='truck', prefix='fa'),
+                popup="TRK-01: Diverted via Bypass B (ETA: 63 min)"
+            ).add_to(m)
+            m.fit_bounds(bypass_route_coords)
+
         nodes_gdf, _ = ox.graph_to_gdfs(base_G)
         guw_ll = (nodes_gdf.loc[all_nodes[0]].geometry.y, nodes_gdf.loc[all_nodes[0]].geometry.x)
         folium.Marker(guw_ll, icon=folium.Icon(color='blue', icon='box', prefix='fa'), tooltip="Guwahati Hub").add_to(m)
@@ -306,42 +335,11 @@ if screen == "🚨 Command Dashboard":
         nong_ll = (nodes_gdf.loc[all_nodes[-1]].geometry.y, nodes_gdf.loc[all_nodes[-1]].geometry.x)
         folium.Marker(nong_ll, icon=folium.Icon(color='red', icon='hospital', prefix='fa'), tooltip="Nongpoh Hospital").add_to(m)
         
-        if final_blocks:
-            w_block = roads[roads["segment_id"].isin(final_blocks)].iloc[0]
-            if hasattr(w_block.geometry, 'bounds'):
-                cb = w_block.geometry.bounds
-                br_ll = ((cb[1] + cb[3]) / 2, (cb[0] + cb[2]) / 2)
-                folium.Marker(br_ll, icon=folium.Icon(color='orange', icon='exclamation-triangle', prefix='fa'), tooltip="⚠️ Obstruction").add_to(m)
-        
         for v in fleet_status:
             if v["lat"] == 0 and v["lon"] == 0: continue
-            if v["id"] == "TRK-01" and st.session_state.get('is_rerouted'): continue
+            if v["id"] == "TRK-01" and st.session_state.get('is_rerouted', False): continue
             ic_col = "blue" if v["rerouted"] else ("red" if v["alert"] else "green")
             folium.Marker([v["lat"], v["lon"]], icon=folium.Icon(color=ic_col, icon="truck", prefix="fa"), tooltip=v['id']).add_to(m)
-            
-            if v["remaining_coords"] and not (v["id"] == "TRK-01" and st.session_state.get('is_rerouted')):
-                line_color = "#22c55e" if v["rerouted"] else ("#ef4444" if v["alert"] else "#28a745")
-                folium.PolyLine(v["remaining_coords"], color=line_color, weight=5).add_to(m)
-                
-        if st.session_state.get('is_rerouted'):
-            try:
-                res = compute_routes(G, all_nodes[0], all_nodes[-1], blocked_edge_ids=final_blocks, risk_map=risk_map, cargo_tier=1)
-                res_b = compute_routes(G, all_nodes[0], all_nodes[-1], blocked_edge_ids=[], risk_map=risk_map, cargo_tier=1)
-                if res_b.get("baseline_path"):
-                    base_coords = [(nodes_gdf.loc[n].geometry.y, nodes_gdf.loc[n].geometry.x) for n in res_b["baseline_path"]]
-                    folium.PolyLine(base_coords, color="#ef4444", weight=5, dash_array="5, 5", popup="[❌ SEVERED ARTERY]").add_to(m)
-                if res.get("resilient_path"):
-                    res_coords = [(nodes_gdf.loc[n].geometry.y, nodes_gdf.loc[n].geometry.x) for n in res["resilient_path"]]
-                    folium.PolyLine(res_coords, color="#22c55e", weight=6, popup="[⚡ AI RESILIENT BYPASS B]").add_to(m)
-                    folium.Marker(res_coords[len(res_coords)//2], icon=folium.Icon(color="blue", icon="truck", prefix="fa"), tooltip="TRK-01 (REROUTED)").add_to(m)
-            except: pass
-        elif stage >= 9 or (at_risk_convoys and len(final_blocks)>0):
-            try:
-                res_b = compute_routes(G, all_nodes[0], all_nodes[-1], blocked_edge_ids=[], risk_map=risk_map, cargo_tier=3)
-                if res_b.get("baseline_path"):
-                    base_coords = [(nodes_gdf.loc[n].geometry.y, nodes_gdf.loc[n].geometry.x) for n in res_b["baseline_path"]]
-                    folium.PolyLine(base_coords, color="#ef4444", weight=4, dash_array="10, 10").add_to(m)
-            except: pass
             
         st_folium(m, height=450, returned_objects=[], use_container_width=True)
         
