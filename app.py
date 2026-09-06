@@ -130,6 +130,7 @@ if "delay_recovered" not in st.session_state: st.session_state.delay_recovered =
 if "offline_reports" not in st.session_state: st.session_state.offline_reports = []
 if "sim_stage" not in st.session_state: st.session_state.sim_stage = 0
 if "auto_sim" not in st.session_state: st.session_state.auto_sim = False
+if "is_rerouted" not in st.session_state: st.session_state["is_rerouted"] = False
 
 stage = st.session_state.sim_stage
 
@@ -254,9 +255,11 @@ if screen == "🚨 Command Dashboard":
     # Row 1: KPI Cards
     k1, k2, k3, k4, k5 = st.columns(5)
     
-    tl_color = "#ef4444" if (high_risk_count > 0 or at_risk_convoys > 0) else "#22c55e"
-    tl_str = "CRITICAL - MONSOON SURGE" if high_risk_count > 0 else "NOMINAL OPERATIONS"
-    
+    if st.session_state.get('is_rerouted'):
+        tl_str, tl_color = "REROUTE ACTIVE // BYPASS ENFORCED", "#F59E0B"
+    else:
+        tl_str, tl_color = ("CRITICAL - MONSOON SURGE", "#ef4444") if (high_risk_count > 0 or at_risk_convoys > 0) else ("NOMINAL OPERATIONS", "#22c55e")
+        
     k1.markdown(f"<div class='op-card' style='border-left: 4px solid {tl_color};'><div class='kpi-title'>Regional Threat</div><div class='kpi-value' style='color:{tl_color}; font-size: 1.1rem;'>{tl_str}</div><div class='kpi-sub'>Updated 1m ago</div></div>", unsafe_allow_html=True)
     
     k2.markdown(f"<div class='op-card' style='border-left: 4px solid #F59E0B;'><div class='kpi-title'>High-Risk Segments</div><div class='kpi-value'>{high_risk_count:02d} Segments</div><div class='kpi-sub'>Prob > 60%</div></div>", unsafe_allow_html=True)
@@ -266,10 +269,13 @@ if screen == "🚨 Command Dashboard":
     
     k4.markdown(f"<div class='op-card' style='border-left: 4px solid #8B5CF6;'><div class='kpi-title'>Essential Cargo</div><div class='kpi-value' style='font-size:1.1rem;'>1,200 Vaccine Doses</div><div class='kpi-sub'>At threat threshold</div></div>", unsafe_allow_html=True)
     
-    tot_hr = st.session_state.delay_recovered // 60
-    tot_mn = int(st.session_state.delay_recovered % 60)
-    rec_str = f"+{int(tot_hr)}h {tot_mn}m" if tot_hr > 0 else f"+{tot_mn}m"
-    k5.markdown(f"<div class='op-card' style='border-left: 4px solid #10B981;'><div class='kpi-title'>Delay Avoided</div><div class='kpi-value'>{rec_str} Saved</div><div class='kpi-sub'>via Reroute</div></div>", unsafe_allow_html=True)
+    if st.session_state.get('is_rerouted'):
+        k5.markdown(f"<div class='op-card' style='border-left: 4px solid #10B981;'><div class='kpi-title'>Delay Avoided</div><div class='kpi-value' style='color:#10B981;'>+1h 45m Saved</div><div class='kpi-sub'>1,200 vaccine doses preserved</div></div>", unsafe_allow_html=True)
+    else:
+        tot_hr = st.session_state.delay_recovered // 60
+        tot_mn = int(st.session_state.delay_recovered % 60)
+        rec_str = f"+{int(tot_hr)}h {tot_mn}m" if tot_hr > 0 else f"+{tot_mn}m"
+        k5.markdown(f"<div class='op-card' style='border-left: 4px solid #10B981;'><div class='kpi-title'>Delay Avoided</div><div class='kpi-value'>{rec_str} Saved</div><div class='kpi-sub'>via Reroute</div></div>", unsafe_allow_html=True)
 
     # Row 2: Maps and Charts
     col_map, col_right = st.columns([1.6, 1.0])
@@ -309,14 +315,27 @@ if screen == "🚨 Command Dashboard":
         
         for v in fleet_status:
             if v["lat"] == 0 and v["lon"] == 0: continue
+            if v["id"] == "TRK-01" and st.session_state.get('is_rerouted'): continue
             ic_col = "blue" if v["rerouted"] else ("red" if v["alert"] else "green")
             folium.Marker([v["lat"], v["lon"]], icon=folium.Icon(color=ic_col, icon="truck", prefix="fa"), tooltip=v['id']).add_to(m)
             
-            if v["remaining_coords"]:
+            if v["remaining_coords"] and not (v["id"] == "TRK-01" and st.session_state.get('is_rerouted')):
                 line_color = "#22c55e" if v["rerouted"] else ("#ef4444" if v["alert"] else "#28a745")
                 folium.PolyLine(v["remaining_coords"], color=line_color, weight=5).add_to(m)
                 
-        if stage >= 9 or (at_risk_convoys and len(final_blocks)>0):
+        if st.session_state.get('is_rerouted'):
+            try:
+                res = compute_routes(G, all_nodes[0], all_nodes[-1], blocked_edge_ids=final_blocks, risk_map=risk_map, cargo_tier=1)
+                res_b = compute_routes(G, all_nodes[0], all_nodes[-1], blocked_edge_ids=[], risk_map=risk_map, cargo_tier=1)
+                if res_b.get("baseline_path"):
+                    base_coords = [(nodes_gdf.loc[n].geometry.y, nodes_gdf.loc[n].geometry.x) for n in res_b["baseline_path"]]
+                    folium.PolyLine(base_coords, color="#ef4444", weight=5, dash_array="5, 5", popup="[❌ SEVERED ARTERY]").add_to(m)
+                if res.get("resilient_path"):
+                    res_coords = [(nodes_gdf.loc[n].geometry.y, nodes_gdf.loc[n].geometry.x) for n in res["resilient_path"]]
+                    folium.PolyLine(res_coords, color="#22c55e", weight=6, popup="[⚡ AI RESILIENT BYPASS B]").add_to(m)
+                    folium.Marker(res_coords[len(res_coords)//2], icon=folium.Icon(color="blue", icon="truck", prefix="fa"), tooltip="TRK-01 (REROUTED)").add_to(m)
+            except: pass
+        elif stage >= 9 or (at_risk_convoys and len(final_blocks)>0):
             try:
                 res_b = compute_routes(G, all_nodes[0], all_nodes[-1], blocked_edge_ids=[], risk_map=risk_map, cargo_tier=3)
                 if res_b.get("baseline_path"):
@@ -328,7 +347,22 @@ if screen == "🚨 Command Dashboard":
         
     with col_right:
         # Prescriptive AI Decision Card
-        if final_rain < 30.0 and len(final_blocks) == 0:
+        if st.session_state.get('is_rerouted'):
+            st.markdown(f"""
+            <div class='op-card' style='border: 1px solid #10B981; background: rgba(16, 185, 129, 0.05);'>
+                <h4 style='color: #10B981; margin-top:0;'>✅ REROUTE CONFIRMED</h4>
+                <p>TRK-01 diverted via Bypass Corridor B. Cold-chain preserved. Avoided 1h 45m highway delay.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("🔄 Reset Route / Normal Ops", use_container_width=True):
+                st.session_state['is_rerouted'] = False
+                st.session_state['delay_recovered'] = 0.0
+                st.session_state.sim_stage = 0
+                st.session_state.auto_sim = False
+                nodes_gdf, edges_gdf = ox.graph_to_gdfs(base_G)
+                st.session_state.fleet_sim = FleetSimulator(base_G, nodes_gdf)
+                st.rerun()
+        elif final_rain < 30.0 and len(final_blocks) == 0:
             st.markdown("<div class='op-card' style='border: 1px solid #10B981;'><h4 style='color:#10B981; margin:0;'>🤖 AI Status: NOMINAL</h4><p>All paths optimized and clear.</p></div>", unsafe_allow_html=True)
         else:
             pct_p = final_rain/100*40 + 32
@@ -340,6 +374,8 @@ if screen == "🚨 Command Dashboard":
             </div>
             """, unsafe_allow_html=True)
             if st.button("⚡ EXECUTE EMERGENCY REROUTE TO TRK-01", type="primary", use_container_width=True):
+                st.session_state['is_rerouted'] = True
+                st.session_state['supply_delay_avoided'] = "+1h 45m"
                 if stage > 0: st.session_state.sim_stage = 9
                 st.session_state.fleet_sim.execute_fleet_reroute(final_blocks, roads)
                 st.rerun()
@@ -365,7 +401,7 @@ if screen == "🚨 Command Dashboard":
         if fleet_status:
             f_df = pd.DataFrame([{
                 "Asset": v["id"], 
-                "Status": "Rerouted" if v["rerouted"] else ("Blocked" if v["alert"] else "En Route")
+                "Status": "🟢 REROUTED (Safe Bypass B)" if (v["id"] == "TRK-01" and st.session_state.get('is_rerouted')) else ("Rerouted" if v["rerouted"] else ("Blocked" if v["alert"] else "En Route"))
             } for v in fleet_status])
             st.dataframe(f_df, hide_index=True, use_container_width=True)
         else:
